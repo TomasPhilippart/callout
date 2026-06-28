@@ -51,5 +51,6 @@ pub async fn run() -> anyhow::Result<()> {
         });
     }
 
+    tracing::info!(voice = %state.config.tts.voice, "TTS voice configured");
     api::serve(state).await
 }

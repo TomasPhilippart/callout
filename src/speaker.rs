@@ -1,8 +1,9 @@
-pub async fn speak(text: &str) {
-    tracing::info!(text = %text, "speaking");
+pub async fn speak(text: &str, voice: &str) {
+    tracing::info!(text = %text, voice = %voice, "speaking");
 
     #[cfg(target_os = "macos")]
     match tokio::process::Command::new("say")
+        .arg("-v").arg(voice)
         .arg(text)
         .status()
         .await

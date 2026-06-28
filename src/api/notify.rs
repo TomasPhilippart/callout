@@ -26,8 +26,9 @@ pub async fn notify(
     tracing::info!(agent = %name, message = %req.message, "notify");
 
     let text = format!("{name}: {}", req.message);
+    let voice = state.config.tts.voice.clone();
     tokio::spawn(async move {
-        crate::speaker::speak(&text).await;
+        crate::speaker::speak(&text, &voice).await;
     });
 
     Ok(StatusCode::OK)

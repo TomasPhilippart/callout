@@ -22,10 +22,27 @@ pub struct HotkeyConfig {
     pub key: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct TtsConfig {
+    /// macOS: name passed to `say -v`. Set to "Ava (Premium)" for best quality.
+    #[serde(default = "default_voice")]
+    pub voice: String,
+    /// Linux: path to piper binary.
     pub piper_bin: Option<String>,
+    /// Linux: path to piper voice model.
     pub piper_voice: Option<String>,
+}
+
+fn default_voice() -> String { "Samantha".into() }
+
+impl Default for TtsConfig {
+    fn default() -> Self {
+        Self {
+            voice: default_voice(),
+            piper_bin: None,
+            piper_voice: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
