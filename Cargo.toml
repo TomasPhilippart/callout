@@ -1,0 +1,28 @@
+[package]
+name = "callout"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "callout"
+path = "src/main.rs"
+
+[lib]
+name = "callout"
+path = "src/lib.rs"
+
+[dependencies]
+tokio       = { version = "1",   features = ["full"] }
+axum        = "0.7"
+serde       = { version = "1",   features = ["derive"] }
+serde_json  = "1"
+toml        = "0.8"
+uuid        = { version = "1",   features = ["v4"] }
+anyhow      = "1"
+tracing     = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dirs        = "5"
+strsim      = "0.11"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
