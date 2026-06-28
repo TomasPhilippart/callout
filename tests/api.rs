@@ -3,15 +3,17 @@ use axum::http::{Request, StatusCode};
 use callout::{AppState, Config, api, agents::AgentRegistry, router::AskRouter, glossary::Glossary};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tower::ServiceExt;
 
 fn test_state() -> AppState {
+    let (tts_tx, _tts_rx) = mpsc::channel(8);
     AppState {
         agents:   Arc::new(RwLock::new(AgentRegistry::new())),
         router:   Arc::new(Mutex::new(AskRouter::new())),
         config:   Arc::new(Config::default()),
         glossary: Arc::new(Glossary::default()),
+        tts_tx,
     }
 }
 

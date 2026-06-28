@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 
 pub mod agents;
 pub mod api;
@@ -12,10 +12,12 @@ pub use config::Config;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub agents: Arc<RwLock<agents::AgentRegistry>>,
-    pub router: Arc<Mutex<router::AskRouter>>,
-    pub config: Arc<Config>,
+    pub agents:   Arc<RwLock<agents::AgentRegistry>>,
+    pub router:   Arc<Mutex<router::AskRouter>>,
+    pub config:   Arc<Config>,
     pub glossary: Arc<glossary::Glossary>,
+    /// Send text here to queue it for serial TTS playback.
+    pub tts_tx:   mpsc::Sender<String>,
 }
 
 pub async fn run() -> anyhow::Result<()> {
@@ -29,11 +31,21 @@ pub async fn run() -> anyhow::Result<()> {
     let config = Config::load()?;
     let glossary = glossary::Glossary::load();
 
+    let (tts_tx, mut tts_rx) = mpsc::channel::<String>(32);
+    let tts_voice = config.tts.voice.clone();
+
+    tokio::spawn(async move {
+        while let Some(text) = tts_rx.recv().await {
+            speaker::speak(&text, &tts_voice).await;
+        }
+    });
+
     let state = AppState {
-        agents: Arc::new(RwLock::new(agents::AgentRegistry::new())),
-        router: Arc::new(Mutex::new(router::AskRouter::new())),
-        config: Arc::new(config),
+        agents:   Arc::new(RwLock::new(agents::AgentRegistry::new())),
+        router:   Arc::new(Mutex::new(router::AskRouter::new())),
+        config:   Arc::new(config),
         glossary: Arc::new(glossary),
+        tts_tx,
     };
 
     {

@@ -57,10 +57,7 @@ pub async fn ask(
     tracing::info!(agent = %name, question = %req.question, "ask");
 
     let spoken = build_spoken_prompt(&name, &req.question, &req.choices);
-    let voice = state.config.tts.voice.clone();
-    tokio::spawn(async move {
-        crate::speaker::speak(&spoken, &voice).await;
-    });
+    let _ = state.tts_tx.send(spoken).await;
 
     let (tx, rx) = oneshot::channel::<AskResponse>();
     state.router.lock().await.insert(
