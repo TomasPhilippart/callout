@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Callout</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0a0a0a; color: #e0e0e0; line-height: 1.6; }
+  .hero { padding: 80px 40px; text-align: center; border-bottom: 1px solid #1e1e1e; }
+  h1 { font-size: 3rem; font-weight: 700; letter-spacing: -1px; color: #fff; }
+  .tagline { font-size: 1.2rem; color: #888; margin-top: 12px; max-width: 520px; margin-left: auto; margin-right: auto; }
+  .pill { display: inline-block; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 20px; padding: 4px 14px; font-size: 0.8rem; color: #666; margin-top: 20px; }
+  section { max-width: 760px; margin: 0 auto; padding: 60px 40px; border-bottom: 1px solid #1a1a1a; }
+  h2 { font-size: 1.4rem; font-weight: 600; color: #fff; margin-bottom: 20px; }
+  h3 { font-size: 0.9rem; font-weight: 600; color: #aaa; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+  p { color: #999; margin-bottom: 14px; }
+  .flow { display: flex; flex-direction: column; gap: 0; margin: 24px 0; }
+  .step { display: flex; gap: 16px; padding: 16px 0; border-top: 1px solid #1a1a1a; }
+  .step:last-child { border-bottom: 1px solid #1a1a1a; }
+  .step-num { width: 28px; height: 28px; border-radius: 50%; background: #1a1a1a; border: 1px solid #2e2e2e; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: #666; flex-shrink: 0; margin-top: 2px; }
+  .step-body strong { color: #e0e0e0; display: block; margin-bottom: 2px; }
+  .step-body span { color: #666; font-size: 0.9rem; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
+  .card { background: #111; border: 1px solid #1e1e1e; border-radius: 8px; padding: 20px; }
+  .card h3 { color: #fff; text-transform: none; letter-spacing: 0; font-size: 1rem; margin-bottom: 6px; }
+  .card p { font-size: 0.88rem; margin: 0; }
+  code { font-family: "SF Mono", "Fira Code", monospace; background: #111; border: 1px solid #1e1e1e; border-radius: 4px; padding: 2px 6px; font-size: 0.82rem; color: #b5b5b5; }
+  pre { background: #111; border: 1px solid #1e1e1e; border-radius: 8px; padding: 20px; font-family: "SF Mono", "Fira Code", monospace; font-size: 0.82rem; color: #b5b5b5; overflow-x: auto; line-height: 1.7; margin: 16px 0; }
+  .api-row { display: flex; gap: 12px; padding: 12px 0; border-top: 1px solid #1a1a1a; align-items: flex-start; }
+  .api-row:last-child { border-bottom: 1px solid #1a1a1a; }
+  .method { font-family: monospace; font-size: 0.78rem; padding: 2px 8px; border-radius: 4px; flex-shrink: 0; margin-top: 2px; }
+  .post { background: #1a2a1a; color: #4caf50; }
+  .get  { background: #1a1a2a; color: #64b5f6; }
+  .del  { background: #2a1a1a; color: #ef5350; }
+  .api-desc strong { color: #e0e0e0; font-size: 0.9rem; display: block; }
+  .api-desc span { color: #666; font-size: 0.85rem; }
+  .stack-row { display: flex; justify-content: space-between; padding: 10px 0; border-top: 1px solid #1a1a1a; font-size: 0.88rem; }
+  .stack-row:last-child { border-bottom: 1px solid #1a1a1a; }
+  .stack-row span:first-child { color: #e0e0e0; font-family: monospace; }
+  .stack-row span:last-child { color: #666; }
+  .oob { display: inline-block; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 4px; padding: 3px 10px; font-size: 0.8rem; color: #555; margin: 4px 4px 4px 0; }
+  footer { text-align: center; padding: 40px; color: #333; font-size: 0.8rem; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Callout</h1>
+  <p class="tagline">An ambient voice interface for developers running AI agents. Speaks up when your agents need you. Listens when you respond.</p>
+  <span class="pill">macOS · Linux · Rust · on-device</span>
+</div>
+
+<section>
+  <h2>The problem</h2>
+  <p>AI agents do the work. But you still end up babysitting — watching terminals, switching windows, checking if something needs a decision. The more agents you run, the worse it gets.</p>
+  <p>Callout removes the watching. You work, cook, or do whatever — and it speaks up the moment a decision is needed. You answer out loud. It routes the answer back. Done.</p>
+</section>
+
+<section>
+  <h2>How it works</h2>
+  <div class="flow">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <strong>Agent hits the Callout API</strong>
+        <span>Any agent, any language, any framework — a single POST request.</span>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <strong>Callout speaks the question out loud</strong>
+        <span>"auth-refactor asks: Should I delete the generated files? A: Yes. B: No."</span>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <strong>You respond by voice</strong>
+        <span>Hold the push-to-talk hotkey, say your answer, release.</span>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <strong>The agent gets the answer and continues</strong>
+        <span>The HTTP request resolves. No polling, no webhooks, no UI to open.</span>
+      </div>
+    </div>
+  </div>
+  <p>You can also ask what's happening at any time — press the hotkey, say "what's running?" and Callout tells you in plain language.</p>
+</section>
+
+<section>
+  <h2>API</h2>
+  <p>A local HTTP server on <code>localhost:7878</code>. Three endpoints. Works from curl, any language, any agent framework.</p>
+
+  <div class="api-row">
+    <span class="method post">POST</span>
+    <div class="api-desc">
+      <strong>/agents/register</strong>
+      <span>Register an agent with a name and optional context terms. Returns an <code>agent_id</code> for subsequent calls.</span>
+    </div>
+  </div>
+  <div class="api-row">
+    <span class="method post">POST</span>
+    <div class="api-desc">
+      <strong>/notify</strong>
+      <span>Fire-and-forget. Callout speaks the message and logs it. Returns immediately.</span>
+    </div>
+  </div>
+  <div class="api-row">
+    <span class="method post">POST</span>
+    <div class="api-desc">
+      <strong>/ask</strong>
+      <span>Blocking. Speaks the question, listens for your response, returns the answer. Supports multiple-choice options, multi-select, and timeout with a default.</span>
+    </div>
+  </div>
+  <div class="api-row">
+    <span class="method get">GET</span>
+    <div class="api-desc">
+      <strong>/status</strong>
+      <span>Returns all registered agents, their state, and last-seen time.</span>
+    </div>
+  </div>
+  <div class="api-row">
+    <span class="method del">DELETE</span>
+    <div class="api-desc">
+      <strong>/agents/{id}</strong>
+      <span>Deregister an agent. Agents inactive for 5 minutes are marked stale automatically.</span>
+    </div>
+  </div>
+
+  <pre>curl -X POST localhost:7878/ask \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "a1b2c3",
+    "question": "Which approach should I take?",
+    "choices": [
+      { "key": "A", "label": "Rewrite from scratch" },
+      { "key": "B", "label": "Patch the existing code" }
+    ],
+    "timeout_seconds": 120,
+    "default": "B"
+  }'
+
+→ { "answer": "B", "answers": ["B"], "raw": "patch it", "timed_out": false }</pre>
+</section>
+
+<section>
+  <h2>Voice</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Speech-to-text</h3>
+      <p>Whisper.cpp via <code>whisper-rs</code>. On-device, no API keys. Model lives in <code>~/.callout/models/</code>. Tiny model is fast enough; base model is the default.</p>
+    </div>
+    <div class="card">
+      <h3>Text-to-speech</h3>
+      <p>macOS: built-in <code>say</code> command (Apple neural voices). Linux: Piper TTS with a local voice model. Zero cloud dependency.</p>
+    </div>
+    <div class="card">
+      <h3>Push-to-talk</h3>
+      <p>Global hotkey (default: Option / Alt). Hold to record, release to transcribe. Works across all apps, no focus required.</p>
+    </div>
+    <div class="card">
+      <h3>Glossary</h3>
+      <p>Domain terms in <code>~/.callout/glossary.toml</code> fed to Whisper as context. Fixes "Cloud" → "Claude", project-specific names, etc. Agents add their own terms at registration.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Menu bar</h2>
+  <p>Four icon states — idle, active, waiting (agent blocked on <code>/ask</code>), listening (hotkey held). Click to see active agents and a recent log of messages.</p>
+
+  <!-- macOS menu bar mockup -->
+  <div style="margin: 32px 0; user-select: none;">
+
+    <!-- Menu bar strip -->
+    <div style="background: #1c1c1e; border-radius: 10px 10px 0 0; height: 28px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid #333;">
+      <div style="display:flex; gap: 10px; align-items: center;">
+        <span style="font-size: 0.78rem; font-weight: 600; color: #fff;"></span>
+        <span style="font-size: 0.78rem; color: #aaa;">File</span>
+        <span style="font-size: 0.78rem; color: #aaa;">Edit</span>
+        <span style="font-size: 0.78rem; color: #aaa;">View</span>
+      </div>
+      <div style="display:flex; gap: 14px; align-items: center;">
+        <span style="font-size: 0.75rem; color: #aaa;">Sat 28 Jun</span>
+        <span style="font-size: 0.75rem; color: #aaa;">11:42</span>
+        <!-- Callout icon — active/waiting state, highlighted -->
+        <span style="font-size: 0.78rem; color: #fff; background: #0066cc; border-radius: 4px; padding: 1px 7px; display:flex; align-items:center; gap: 4px;">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="5" cy="5" r="3" fill="#fff" opacity="0.9"/>
+            <circle cx="5" cy="5" r="5" stroke="#fff" stroke-width="1" fill="none" opacity="0.4"/>
+          </svg>
+          callout
+        </span>
+      </div>
+    </div>
+
+    <!-- Dropdown panel -->
+    <div style="background: #2a2a2c; border: 1px solid #3a3a3c; border-radius: 0 0 10px 10px; width: 280px; margin-left: auto; font-size: 0.8rem; box-shadow: 0 8px 32px rgba(0,0,0,0.6);">
+
+      <!-- Header -->
+      <div style="padding: 10px 14px 8px; border-bottom: 1px solid #3a3a3c;">
+        <div style="font-weight: 600; color: #fff; font-size: 0.82rem; margin-bottom: 2px;">Callout</div>
+        <div style="color: #888; font-size: 0.75rem;">2 agents · 1 waiting</div>
+      </div>
+
+      <!-- Agents -->
+      <div style="padding: 6px 0; border-bottom: 1px solid #3a3a3c;">
+        <!-- Waiting agent -->
+        <div style="display:flex; align-items:center; gap: 10px; padding: 5px 14px; background: rgba(255,200,0,0.06);">
+          <span style="width: 7px; height: 7px; border-radius: 50%; background: #f5a623; flex-shrink:0; box-shadow: 0 0 6px #f5a623aa;"></span>
+          <div style="flex:1; min-width:0;">
+            <div style="color: #fff; font-weight: 500;">auth-refactor</div>
+            <div style="color: #f5a623; font-size: 0.72rem;">waiting for response</div>
+          </div>
+          <span style="font-size: 0.7rem; color: #666; background: #1a1a1c; border: 1px solid #333; border-radius: 3px; padding: 1px 6px;">ASK</span>
+        </div>
+        <!-- Active agent -->
+        <div style="display:flex; align-items:center; gap: 10px; padding: 5px 14px;">
+          <span style="width: 7px; height: 7px; border-radius: 50%; background: #30d158; flex-shrink:0;"></span>
+          <div style="flex:1;">
+            <div style="color: #ddd; font-weight: 500;">test-runner</div>
+            <div style="color: #666; font-size: 0.72rem;">running integration tests</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent log -->
+      <div style="padding: 6px 0; border-bottom: 1px solid #3a3a3c;">
+        <div style="padding: 3px 14px 5px; font-size: 0.7rem; color: #555; text-transform: uppercase; letter-spacing: 0.8px;">Recent</div>
+        <div style="padding: 4px 14px; color: #888; font-size: 0.75rem; display:flex; gap:8px;">
+          <span style="color: #f5a623; flex-shrink:0;">auth-refactor</span>
+          <span>"Should I delete generated files?"</span>
+        </div>
+        <div style="padding: 4px 14px; color: #888; font-size: 0.75rem; display:flex; gap:8px;">
+          <span style="color: #555; flex-shrink:0;">test-runner</span>
+          <span>Build finished, 3 tests failed</span>
+        </div>
+        <div style="padding: 4px 14px; color: #888; font-size: 0.75rem; display:flex; gap:8px;">
+          <span style="color: #555; flex-shrink:0;">test-runner</span>
+          <span>Starting integration tests</span>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div style="padding: 6px 0;">
+        <div style="padding: 5px 14px; color: #aaa; font-size: 0.8rem; cursor: pointer;">Settings...</div>
+        <div style="padding: 5px 14px; color: #aaa; font-size: 0.8rem; cursor: pointer;">Quit Callout</div>
+      </div>
+
+    </div>
+  </div>
+
+</section>
+
+<section>
+  <h2>Tech stack</h2>
+  <div class="stack-row"><span>tokio + axum</span><span>async runtime + HTTP server</span></div>
+  <div class="stack-row"><span>whisper-rs</span><span>on-device speech-to-text</span></div>
+  <div class="stack-row"><span>cpal</span><span>cross-platform audio capture</span></div>
+  <div class="stack-row"><span>tray-icon</span><span>menu bar (macOS + Linux)</span></div>
+  <div class="stack-row"><span>global-hotkey</span><span>push-to-talk across all apps</span></div>
+  <div class="stack-row"><span>strsim</span><span>fuzzy matching for choice selection</span></div>
+  <div class="stack-row"><span>say / piper</span><span>text-to-speech, platform-native</span></div>
+</section>
+
+<section>
+  <h2>Out of scope for v1</h2>
+  <p>
+    <span class="oob">MCP adapter</span>
+    <span class="oob">Wake word</span>
+    <span class="oob">Glossary auto-learning</span>
+    <span class="oob">Clickable menu bar choices</span>
+    <span class="oob">Urgency levels</span>
+    <span class="oob">Multi-language STT</span>
+  </p>
+</section>
+
+<footer>Callout — internal reference · 2026-06-28</footer>
+
+</body>
+</html>
