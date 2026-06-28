@@ -1,6 +1,7 @@
 use axum::{extract::State, http::StatusCode, Json};
 use serde::Deserialize;
 use crate::AppState;
+use super::AppError;
 
 #[derive(Deserialize)]
 pub struct NotifyRequest {
@@ -11,19 +12,23 @@ pub struct NotifyRequest {
 pub async fn notify(
     State(state): State<AppState>,
     Json(req): Json<NotifyRequest>,
-) -> StatusCode {
+) -> Result<StatusCode, AppError> {
+    if req.message.trim().is_empty() {
+        return Err(AppError::BadRequest("message must not be empty".into()));
+    }
+
     let name = {
         let mut agents = state.agents.write().await;
         agents.touch(&req.agent_id);
         agents.name(&req.agent_id)
     };
 
-    tracing::info!("[{name}] {}", req.message);
+    tracing::info!(agent = %name, message = %req.message, "notify");
 
     let text = format!("{name}: {}", req.message);
     tokio::spawn(async move {
         crate::speaker::speak(&text).await;
     });
 
-    StatusCode::OK
+    Ok(StatusCode::OK)
 }

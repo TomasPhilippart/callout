@@ -36,15 +36,6 @@ impl AskRouter {
         self.pending.remove(agent_id)
     }
 
-    /// Returns the agent_id of the first waiting ask, if any.
-    pub fn first_pending_id(&self) -> Option<String> {
-        self.pending.keys().next().cloned()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.pending.is_empty()
-    }
-
     /// Resolve a pending ask by matching the transcript against choices.
     /// Falls back to raw transcript if no choices or no match found.
     pub fn resolve(&mut self, agent_id: &str, raw: String) -> bool {
@@ -62,20 +53,21 @@ impl AskRouter {
             false
         }
     }
+
+    pub fn pending_agent_ids(&self) -> impl Iterator<Item = &str> {
+        self.pending.keys().map(String::as_str)
+    }
 }
 
-/// Fuzzy-match a transcript against available choice labels/keys.
 fn match_choice<'a>(choices: &'a [Choice], transcript: &str) -> Option<&'a str> {
     let t = transcript.to_lowercase();
 
-    // Exact key match first ("a", "b", "yes", "no")
     for c in choices {
         if t.contains(&c.key.to_lowercase()) || t.contains(&c.label.to_lowercase()) {
             return Some(&c.key);
         }
     }
 
-    // Fuzzy fallback via strsim
     choices
         .iter()
         .map(|c| {
@@ -86,4 +78,75 @@ fn match_choice<'a>(choices: &'a [Choice], transcript: &str) -> Option<&'a str> 
         .filter(|(s, _)| *s > 0.8)
         .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
         .map(|(_, k)| k)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_ask(choices: Vec<Choice>) -> (PendingAsk, oneshot::Receiver<AskResponse>) {
+        let (tx, rx) = oneshot::channel();
+        let ask = PendingAsk {
+            agent_id: "agent1".into(),
+            question: "Proceed?".into(),
+            choices,
+            tx,
+        };
+        (ask, rx)
+    }
+
+    #[test]
+    fn resolve_no_choices_returns_raw() {
+        let mut router = AskRouter::new();
+        let (ask, mut rx) = make_ask(vec![]);
+        router.insert("agent1".into(), ask);
+
+        assert!(router.resolve("agent1", "hello world".into()));
+        let resp = rx.try_recv().unwrap();
+        assert_eq!(resp.answer.as_deref(), Some("hello world"));
+        assert_eq!(resp.raw.as_deref(), Some("hello world"));
+    }
+
+    #[test]
+    fn resolve_exact_key_match() {
+        let mut router = AskRouter::new();
+        let (ask, mut rx) = make_ask(vec![
+            Choice { key: "yes".into(), label: "Yes, proceed".into() },
+            Choice { key: "no".into(), label: "No, cancel".into() },
+        ]);
+        router.insert("agent1".into(), ask);
+
+        router.resolve("agent1", "yes please do it".into());
+        let resp = rx.try_recv().unwrap();
+        assert_eq!(resp.answer.as_deref(), Some("yes"));
+    }
+
+    #[test]
+    fn resolve_exact_label_match() {
+        let mut router = AskRouter::new();
+        let (ask, mut rx) = make_ask(vec![
+            Choice { key: "y".into(), label: "confirm".into() },
+            Choice { key: "n".into(), label: "deny".into() },
+        ]);
+        router.insert("agent1".into(), ask);
+
+        router.resolve("agent1", "I want to confirm that".into());
+        let resp = rx.try_recv().unwrap();
+        assert_eq!(resp.answer.as_deref(), Some("y"));
+    }
+
+    #[test]
+    fn resolve_unknown_agent_returns_false() {
+        let mut router = AskRouter::new();
+        assert!(!router.resolve("nobody", "hello".into()));
+    }
+
+    #[test]
+    fn resolve_removes_pending_ask() {
+        let mut router = AskRouter::new();
+        let (ask, _rx) = make_ask(vec![]);
+        router.insert("agent1".into(), ask);
+        router.resolve("agent1", "done".into());
+        assert!(!router.resolve("agent1", "again".into()));
+    }
 }

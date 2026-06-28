@@ -12,6 +12,8 @@ pub struct Config {
     pub hotkey: HotkeyConfig,
     #[serde(default)]
     pub tts: TtsConfig,
+    #[serde(default)]
+    pub daemon: DaemonConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -26,9 +28,21 @@ pub struct TtsConfig {
     pub piper_voice: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct DaemonConfig {
+    /// How often (in seconds) the agent prune job runs.
+    #[serde(default = "default_prune_interval_secs")]
+    pub prune_interval_secs: u64,
+    /// Agents not seen within this many seconds are considered stale.
+    #[serde(default = "default_stale_secs")]
+    pub stale_secs: u64,
+}
+
 fn default_port() -> u16 { 7878 }
 fn default_model() -> String { "base".into() }
 fn default_key() -> String { "Alt".into() }
+fn default_prune_interval_secs() -> u64 { 60 }
+fn default_stale_secs() -> u64 { 300 }
 
 impl Default for Config {
     fn default() -> Self {
@@ -37,6 +51,7 @@ impl Default for Config {
             model: default_model(),
             hotkey: HotkeyConfig::default(),
             tts: TtsConfig::default(),
+            daemon: DaemonConfig::default(),
         }
     }
 }
@@ -44,6 +59,15 @@ impl Default for Config {
 impl Default for HotkeyConfig {
     fn default() -> Self {
         Self { key: default_key() }
+    }
+}
+
+impl Default for DaemonConfig {
+    fn default() -> Self {
+        Self {
+            prune_interval_secs: default_prune_interval_secs(),
+            stale_secs: default_stale_secs(),
+        }
     }
 }
 
@@ -60,9 +84,5 @@ impl Config {
 
     pub fn dir() -> PathBuf {
         dirs::home_dir().unwrap_or_default().join(".callout")
-    }
-
-    pub fn models_dir() -> PathBuf {
-        Self::dir().join("models")
     }
 }

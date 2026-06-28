@@ -5,6 +5,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use crate::AppState;
+use super::AppError;
 
 #[derive(Deserialize)]
 pub struct RegisterRequest {
@@ -22,24 +23,28 @@ pub struct RegisterResponse {
 pub async fn register(
     State(state): State<AppState>,
     Json(req): Json<RegisterRequest>,
-) -> Json<RegisterResponse> {
+) -> Result<Json<RegisterResponse>, AppError> {
+    if req.name.trim().is_empty() {
+        return Err(AppError::BadRequest("name must not be empty".into()));
+    }
+
     let id = state.agents.write().await.register(
-        req.name,
+        req.name.trim().to_string(),
         req.description,
         req.context_terms,
     );
-    tracing::info!("Agent registered: {id}");
-    Json(RegisterResponse { agent_id: id })
+    tracing::info!(agent_id = %id, "agent registered");
+    Ok(Json(RegisterResponse { agent_id: id }))
 }
 
 pub async fn deregister(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> StatusCode {
+) -> Result<StatusCode, AppError> {
     if state.agents.write().await.remove(&id) {
-        tracing::info!("Agent deregistered: {id}");
-        StatusCode::NO_CONTENT
+        tracing::info!(agent_id = %id, "agent deregistered");
+        Ok(StatusCode::NO_CONTENT)
     } else {
-        StatusCode::NOT_FOUND
+        Err(AppError::NotFound(format!("agent {id} not found")))
     }
 }
