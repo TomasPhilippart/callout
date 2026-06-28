@@ -1,11 +1,11 @@
+use super::AppError;
+use crate::AppState;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     Json,
 };
 use serde::{Deserialize, Serialize};
-use crate::AppState;
-use super::AppError;
 
 #[derive(Deserialize)]
 pub struct RegisterRequest {

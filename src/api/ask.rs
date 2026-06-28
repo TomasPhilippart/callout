@@ -1,13 +1,13 @@
-use axum::{extract::State, Json};
-use serde::{Deserialize, Serialize};
-use tokio::sync::oneshot;
-use tokio::time::{timeout, Duration};
+use super::AppError;
 use crate::{
     agents::AgentState,
     router::{AskResponse, Choice, PendingAsk},
     AppState,
 };
-use super::AppError;
+use axum::{extract::State, Json};
+use serde::{Deserialize, Serialize};
+use tokio::sync::oneshot;
+use tokio::time::{timeout, Duration};
 
 #[derive(Deserialize)]
 pub struct AskRequest {
@@ -57,9 +57,7 @@ pub async fn ask(
     tracing::info!(agent = %name, question = %req.question, "ask");
 
     let spoken = build_spoken_prompt(&name, &req.question, &req.choices);
-    tokio::spawn(async move {
-        crate::speaker::speak(&spoken).await;
-    });
+    let _ = state.tts_tx.send(spoken).await;
 
     let (tx, rx) = oneshot::channel::<AskResponse>();
     state.router.lock().await.insert(
@@ -67,8 +65,13 @@ pub async fn ask(
         PendingAsk {
             agent_id: req.agent_id.clone(),
             question: req.question.clone(),
-            choices: req.choices.iter()
-                .map(|c| Choice { key: c.key.clone(), label: c.label.clone() })
+            choices: req
+                .choices
+                .iter()
+                .map(|c| Choice {
+                    key: c.key.clone(),
+                    label: c.label.clone(),
+                })
                 .collect(),
             tx,
         },
@@ -76,7 +79,11 @@ pub async fn ask(
 
     let result = timeout(Duration::from_secs(timeout_secs), rx).await;
 
-    state.agents.write().await.set_state(&req.agent_id, AgentState::Idle);
+    state
+        .agents
+        .write()
+        .await
+        .set_state(&req.agent_id, AgentState::Idle);
     state.router.lock().await.remove(&req.agent_id);
 
     match result {

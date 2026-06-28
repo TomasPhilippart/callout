@@ -1,7 +1,7 @@
+use super::AppError;
+use crate::AppState;
 use axum::{extract::State, http::StatusCode, Json};
 use serde::Deserialize;
-use crate::AppState;
-use super::AppError;
 
 #[derive(Deserialize)]
 pub struct NotifyRequest {
@@ -26,9 +26,7 @@ pub async fn notify(
     tracing::info!(agent = %name, message = %req.message, "notify");
 
     let text = format!("{name}: {}", req.message);
-    tokio::spawn(async move {
-        crate::speaker::speak(&text).await;
-    });
+    let _ = state.tts_tx.send(text).await;
 
     Ok(StatusCode::OK)
 }

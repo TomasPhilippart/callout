@@ -1,6 +1,6 @@
+use crate::AppState;
 use axum::{extract::State, Json};
 use serde::Serialize;
-use crate::AppState;
 
 #[derive(Serialize)]
 pub struct StatusResponse {

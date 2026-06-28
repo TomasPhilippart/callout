@@ -1,17 +1,21 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use callout::{AppState, Config, api, agents::AgentRegistry, router::AskRouter, glossary::Glossary};
+use callout::{
+    agents::AgentRegistry, api, glossary::Glossary, router::AskRouter, AppState, Config,
+};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tower::ServiceExt;
 
 fn test_state() -> AppState {
+    let (tts_tx, _tts_rx) = mpsc::channel(8);
     AppState {
-        agents:   Arc::new(RwLock::new(AgentRegistry::new())),
-        router:   Arc::new(Mutex::new(AskRouter::new())),
-        config:   Arc::new(Config::default()),
+        agents: Arc::new(RwLock::new(AgentRegistry::new())),
+        router: Arc::new(Mutex::new(AskRouter::new())),
+        config: Arc::new(Config::default()),
         glossary: Arc::new(Glossary::default()),
+        tts_tx,
     }
 }
 
@@ -31,7 +35,9 @@ async fn request(
     };
     let resp = app.oneshot(builder.body(body).unwrap()).await.unwrap();
     let status = resp.status();
-    let bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024).await.unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     let json = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
     (status, json)
 }
@@ -42,9 +48,11 @@ async fn request(
 async fn register_returns_6_char_agent_id() {
     let (status, body) = request(
         api::build_app(test_state()),
-        "POST", "/agents/register",
+        "POST",
+        "/agents/register",
         Some(json!({"name": "Claude"})),
-    ).await;
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     let id = body["agent_id"].as_str().unwrap();
     assert_eq!(id.len(), 6);
@@ -54,9 +62,11 @@ async fn register_returns_6_char_agent_id() {
 async fn register_empty_name_is_400() {
     let (status, body) = request(
         api::build_app(test_state()),
-        "POST", "/agents/register",
+        "POST",
+        "/agents/register",
         Some(json!({"name": "  "})),
-    ).await;
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(body["error"].is_string());
 }
@@ -65,9 +75,11 @@ async fn register_empty_name_is_400() {
 async fn register_missing_name_is_422() {
     let (status, _) = request(
         api::build_app(test_state()),
-        "POST", "/agents/register",
+        "POST",
+        "/agents/register",
         Some(json!({})),
-    ).await;
+    )
+    .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
@@ -78,16 +90,20 @@ async fn deregister_existing_agent_is_204() {
     let state = test_state();
     let (_, reg) = request(
         api::build_app(state.clone()),
-        "POST", "/agents/register",
+        "POST",
+        "/agents/register",
         Some(json!({"name": "Bot"})),
-    ).await;
+    )
+    .await;
     let id = reg["agent_id"].as_str().unwrap();
 
     let (status, _) = request(
         api::build_app(state),
-        "DELETE", &format!("/agents/{id}"),
+        "DELETE",
+        &format!("/agents/{id}"),
         None,
-    ).await;
+    )
+    .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 }
 
@@ -95,9 +111,11 @@ async fn deregister_existing_agent_is_204() {
 async fn deregister_unknown_agent_is_404() {
     let (status, body) = request(
         api::build_app(test_state()),
-        "DELETE", "/agents/zzzzzz",
+        "DELETE",
+        "/agents/zzzzzz",
         None,
-    ).await;
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert!(body["error"].is_string());
 }
@@ -109,16 +127,14 @@ async fn status_returns_registered_agents() {
     let state = test_state();
     let (_, reg) = request(
         api::build_app(state.clone()),
-        "POST", "/agents/register",
+        "POST",
+        "/agents/register",
         Some(json!({"name": "StatusBot"})),
-    ).await;
+    )
+    .await;
     let id = reg["agent_id"].as_str().unwrap();
 
-    let (status, body) = request(
-        api::build_app(state),
-        "GET", "/status",
-        None,
-    ).await;
+    let (status, body) = request(api::build_app(state), "GET", "/status", None).await;
     assert_eq!(status, StatusCode::OK);
     let agents = body["agents"].as_array().unwrap();
     assert_eq!(agents.len(), 1);
@@ -129,11 +145,7 @@ async fn status_returns_registered_agents() {
 
 #[tokio::test]
 async fn status_empty_when_no_agents() {
-    let (status, body) = request(
-        api::build_app(test_state()),
-        "GET", "/status",
-        None,
-    ).await;
+    let (status, body) = request(api::build_app(test_state()), "GET", "/status", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["agents"].as_array().unwrap().len(), 0);
 }
@@ -144,9 +156,11 @@ async fn status_empty_when_no_agents() {
 async fn notify_empty_message_is_400() {
     let (status, body) = request(
         api::build_app(test_state()),
-        "POST", "/notify",
+        "POST",
+        "/notify",
         Some(json!({"agent_id": "abc123", "message": ""})),
-    ).await;
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(body["error"].is_string());
 }
@@ -155,9 +169,11 @@ async fn notify_empty_message_is_400() {
 async fn notify_unknown_agent_succeeds_as_unknown() {
     let (status, _) = request(
         api::build_app(test_state()),
-        "POST", "/notify",
+        "POST",
+        "/notify",
         Some(json!({"agent_id": "nobody", "message": "hello"})),
-    ).await;
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
 }
 
@@ -167,9 +183,11 @@ async fn notify_unknown_agent_succeeds_as_unknown() {
 async fn ask_empty_question_is_400() {
     let (status, body) = request(
         api::build_app(test_state()),
-        "POST", "/ask",
+        "POST",
+        "/ask",
         Some(json!({"agent_id": "abc123", "question": "  "})),
-    ).await;
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(body["error"].is_string());
 }
@@ -178,9 +196,11 @@ async fn ask_empty_question_is_400() {
 async fn ask_invalid_timeout_is_400() {
     let (status, _) = request(
         api::build_app(test_state()),
-        "POST", "/ask",
+        "POST",
+        "/ask",
         Some(json!({"agent_id": "abc123", "question": "Ready?", "timeout_seconds": 9999})),
-    ).await;
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
@@ -188,14 +208,16 @@ async fn ask_invalid_timeout_is_400() {
 async fn ask_times_out_and_returns_default() {
     let (status, body) = request(
         api::build_app(test_state()),
-        "POST", "/ask",
+        "POST",
+        "/ask",
         Some(json!({
             "agent_id": "abc123",
             "question": "Shall we proceed?",
             "timeout_seconds": 1,
             "default": "yes"
         })),
-    ).await;
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["timed_out"].as_bool(), Some(true));
     assert_eq!(body["answer"].as_str(), Some("yes"));

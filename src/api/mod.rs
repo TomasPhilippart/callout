@@ -1,5 +1,8 @@
-use axum::{routing::{delete, get, post}, Router};
 use crate::AppState;
+use axum::{
+    routing::{delete, get, post},
+    Router,
+};
 
 pub mod error;
 
@@ -13,10 +16,10 @@ pub use error::AppError;
 pub fn build_app(state: AppState) -> Router {
     Router::new()
         .route("/agents/register", post(agents::register))
-        .route("/agents/:id",      delete(agents::deregister))
-        .route("/ask",             post(ask::ask))
-        .route("/notify",          post(notify::notify))
-        .route("/status",          get(status::status))
+        .route("/agents/:id", delete(agents::deregister))
+        .route("/ask", post(ask::ask))
+        .route("/notify", post(notify::notify))
+        .route("/status", get(status::status))
         .with_state(state)
 }
 
