@@ -3,10 +3,12 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 
 pub mod agents;
 pub mod api;
+pub mod cli;
 pub mod config;
 pub mod glossary;
 pub mod router;
 pub mod speaker;
+pub mod voices;
 
 pub use config::Config;
 
@@ -63,6 +65,15 @@ pub async fn run() -> anyhow::Result<()> {
         });
     }
 
-    tracing::info!(voice = %state.config.tts.voice, "TTS voice configured");
+    let configured_voice = &state.config.tts.voice;
+    if voices::is_installed(configured_voice) {
+        tracing::info!(voice = %configured_voice, "TTS voice ready");
+    } else {
+        tracing::warn!(
+            voice = %configured_voice,
+            "configured voice not installed — run 'callout voices list' to see what's available"
+        );
+    }
+
     api::serve(state).await
 }
