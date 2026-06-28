@@ -14,12 +14,12 @@ pub use config::Config;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub agents:   Arc<RwLock<agents::AgentRegistry>>,
-    pub router:   Arc<Mutex<router::AskRouter>>,
-    pub config:   Arc<Config>,
+    pub agents: Arc<RwLock<agents::AgentRegistry>>,
+    pub router: Arc<Mutex<router::AskRouter>>,
+    pub config: Arc<Config>,
     pub glossary: Arc<glossary::Glossary>,
     /// Send text here to queue it for serial TTS playback.
-    pub tts_tx:   mpsc::Sender<String>,
+    pub tts_tx: mpsc::Sender<String>,
 }
 
 pub async fn run() -> anyhow::Result<()> {
@@ -43,9 +43,9 @@ pub async fn run() -> anyhow::Result<()> {
     });
 
     let state = AppState {
-        agents:   Arc::new(RwLock::new(agents::AgentRegistry::new())),
-        router:   Arc::new(Mutex::new(router::AskRouter::new())),
-        config:   Arc::new(config),
+        agents: Arc::new(RwLock::new(agents::AgentRegistry::new())),
+        router: Arc::new(Mutex::new(router::AskRouter::new())),
+        config: Arc::new(config),
         glossary: Arc::new(glossary),
         tts_tx,
     };
@@ -55,9 +55,8 @@ pub async fn run() -> anyhow::Result<()> {
         let prune_interval = state.config.daemon.prune_interval_secs;
         let stale_secs = state.config.daemon.stale_secs;
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(
-                tokio::time::Duration::from_secs(prune_interval)
-            );
+            let mut interval =
+                tokio::time::interval(tokio::time::Duration::from_secs(prune_interval));
             loop {
                 interval.tick().await;
                 agents.write().await.prune_stale_after(stale_secs);

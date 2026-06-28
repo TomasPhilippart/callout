@@ -33,7 +33,9 @@ pub struct TtsConfig {
     pub piper_voice: Option<String>,
 }
 
-fn default_voice() -> String { "Samantha".into() }
+fn default_voice() -> String {
+    "Samantha".into()
+}
 
 impl Default for TtsConfig {
     fn default() -> Self {
@@ -55,11 +57,21 @@ pub struct DaemonConfig {
     pub stale_secs: u64,
 }
 
-fn default_port() -> u16 { 7878 }
-fn default_model() -> String { "base".into() }
-fn default_key() -> String { "Alt".into() }
-fn default_prune_interval_secs() -> u64 { 60 }
-fn default_stale_secs() -> u64 { 300 }
+fn default_port() -> u16 {
+    7878
+}
+fn default_model() -> String {
+    "base".into()
+}
+fn default_key() -> String {
+    "Alt".into()
+}
+fn default_prune_interval_secs() -> u64 {
+    60
+}
+fn default_stale_secs() -> u64 {
+    300
+}
 
 impl Default for Config {
     fn default() -> Self {

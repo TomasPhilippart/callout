@@ -3,7 +3,8 @@ pub async fn speak(text: &str, voice: &str) {
 
     #[cfg(target_os = "macos")]
     match tokio::process::Command::new("say")
-        .arg("-v").arg(voice)
+        .arg("-v")
+        .arg(voice)
         .arg(text)
         .status()
         .await

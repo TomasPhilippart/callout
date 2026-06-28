@@ -1,13 +1,13 @@
-use axum::{extract::State, Json};
-use serde::{Deserialize, Serialize};
-use tokio::sync::oneshot;
-use tokio::time::{timeout, Duration};
+use super::AppError;
 use crate::{
     agents::AgentState,
     router::{AskResponse, Choice, PendingAsk},
     AppState,
 };
-use super::AppError;
+use axum::{extract::State, Json};
+use serde::{Deserialize, Serialize};
+use tokio::sync::oneshot;
+use tokio::time::{timeout, Duration};
 
 #[derive(Deserialize)]
 pub struct AskRequest {
@@ -65,8 +65,13 @@ pub async fn ask(
         PendingAsk {
             agent_id: req.agent_id.clone(),
             question: req.question.clone(),
-            choices: req.choices.iter()
-                .map(|c| Choice { key: c.key.clone(), label: c.label.clone() })
+            choices: req
+                .choices
+                .iter()
+                .map(|c| Choice {
+                    key: c.key.clone(),
+                    label: c.label.clone(),
+                })
                 .collect(),
             tx,
         },
@@ -74,7 +79,11 @@ pub async fn ask(
 
     let result = timeout(Duration::from_secs(timeout_secs), rx).await;
 
-    state.agents.write().await.set_state(&req.agent_id, AgentState::Idle);
+    state
+        .agents
+        .write()
+        .await
+        .set_state(&req.agent_id, AgentState::Idle);
     state.router.lock().await.remove(&req.agent_id);
 
     match result {

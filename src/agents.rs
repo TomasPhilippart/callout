@@ -27,7 +27,9 @@ pub struct AgentRegistry {
 
 impl AgentRegistry {
     pub fn new() -> Self {
-        Self { agents: HashMap::new() }
+        Self {
+            agents: HashMap::new(),
+        }
     }
 
     pub fn register(
@@ -42,14 +44,17 @@ impl AgentRegistry {
                 break candidate.to_string();
             }
         };
-        self.agents.insert(id.clone(), Agent {
-            id: id.clone(),
-            name,
-            description,
-            context_terms,
-            state: AgentState::Idle,
-            last_seen: Instant::now(),
-        });
+        self.agents.insert(
+            id.clone(),
+            Agent {
+                id: id.clone(),
+                name,
+                description,
+                context_terms,
+                state: AgentState::Idle,
+                last_seen: Instant::now(),
+            },
+        );
         id
     }
 
@@ -90,7 +95,8 @@ impl AgentRegistry {
     }
 
     pub fn prune_stale_after(&mut self, stale_secs: u64) {
-        self.agents.retain(|_, a| a.last_seen.elapsed().as_secs() < stale_secs);
+        self.agents
+            .retain(|_, a| a.last_seen.elapsed().as_secs() < stale_secs);
     }
 }
 

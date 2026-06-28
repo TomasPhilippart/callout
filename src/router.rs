@@ -25,7 +25,9 @@ pub struct AskRouter {
 
 impl AskRouter {
     pub fn new() -> Self {
-        Self { pending: HashMap::new() }
+        Self {
+            pending: HashMap::new(),
+        }
     }
 
     pub fn insert(&mut self, agent_id: String, ask: PendingAsk) {
@@ -47,7 +49,10 @@ impl AskRouter {
                     .map(|k| k.to_string())
                     .or(Some(raw.clone()))
             };
-            let _ = ask.tx.send(AskResponse { answer, raw: Some(raw) });
+            let _ = ask.tx.send(AskResponse {
+                answer,
+                raw: Some(raw),
+            });
             true
         } else {
             false
@@ -111,8 +116,14 @@ mod tests {
     fn resolve_exact_key_match() {
         let mut router = AskRouter::new();
         let (ask, mut rx) = make_ask(vec![
-            Choice { key: "yes".into(), label: "Yes, proceed".into() },
-            Choice { key: "no".into(), label: "No, cancel".into() },
+            Choice {
+                key: "yes".into(),
+                label: "Yes, proceed".into(),
+            },
+            Choice {
+                key: "no".into(),
+                label: "No, cancel".into(),
+            },
         ]);
         router.insert("agent1".into(), ask);
 
@@ -125,8 +136,14 @@ mod tests {
     fn resolve_exact_label_match() {
         let mut router = AskRouter::new();
         let (ask, mut rx) = make_ask(vec![
-            Choice { key: "y".into(), label: "confirm".into() },
-            Choice { key: "n".into(), label: "deny".into() },
+            Choice {
+                key: "y".into(),
+                label: "confirm".into(),
+            },
+            Choice {
+                key: "n".into(),
+                label: "deny".into(),
+            },
         ]);
         router.insert("agent1".into(), ask);
 

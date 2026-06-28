@@ -1,6 +1,6 @@
+use crate::Config;
 use serde::Deserialize;
 use std::collections::HashMap;
-use crate::Config;
 
 #[derive(Debug, Deserialize, Default)]
 pub struct Glossary {
@@ -49,7 +49,10 @@ mod tests {
     fn glossary_with(terms: &[&str], corrections: &[(&str, &str)]) -> Glossary {
         Glossary {
             terms: terms.iter().map(|s| s.to_string()).collect(),
-            corrections: corrections.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            corrections: corrections
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
         }
     }
 

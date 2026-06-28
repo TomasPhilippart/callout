@@ -1,7 +1,7 @@
+use super::AppError;
+use crate::AppState;
 use axum::{extract::State, http::StatusCode, Json};
 use serde::Deserialize;
-use crate::AppState;
-use super::AppError;
 
 #[derive(Deserialize)]
 pub struct NotifyRequest {
