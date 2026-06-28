@@ -21,15 +21,14 @@ pub enum AgentState {
     Waiting,
 }
 
+#[derive(Default)]
 pub struct AgentRegistry {
     agents: HashMap<String, Agent>,
 }
 
 impl AgentRegistry {
     pub fn new() -> Self {
-        Self {
-            agents: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn register(

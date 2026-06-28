@@ -19,15 +19,14 @@ pub struct PendingAsk {
     pub tx: oneshot::Sender<AskResponse>,
 }
 
+#[derive(Default)]
 pub struct AskRouter {
     pending: HashMap<String, PendingAsk>,
 }
 
 impl AskRouter {
     pub fn new() -> Self {
-        Self {
-            pending: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn insert(&mut self, agent_id: String, ask: PendingAsk) {
