@@ -1,4 +1,4 @@
-use std::sync::atomic::Ordering;
+use std::{cell::Cell, sync::atomic::Ordering};
 
 use tray_icon::{
     menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem},
@@ -7,10 +7,20 @@ use tray_icon::{
 
 use crate::{agents::AgentState, AppState};
 
+#[derive(Clone, Copy, PartialEq)]
+enum IconState {
+    Idle,
+    Recording,
+    Processed,
+    Speaking,
+}
+
 pub struct Tray {
     icon: TrayIcon,
     quit_id: MenuId,
     ptt_label: String,
+    /// Tracks last-applied icon state so set_icon is only called on transitions.
+    last_icon: Cell<IconState>,
 }
 
 pub fn build(ptt_key: &str) -> anyhow::Result<Tray> {
@@ -29,6 +39,7 @@ pub fn build(ptt_key: &str) -> anyhow::Result<Tray> {
         icon: tray,
         quit_id,
         ptt_label,
+        last_icon: Cell::new(IconState::Idle),
     })
 }
 
@@ -43,25 +54,38 @@ pub fn poll(tray: &Tray) -> bool {
 }
 
 /// Update only the icon and tooltip — reads only atomics, no locks.
-/// Called every event-loop tick (~50 ms) for near-instant visual feedback.
+/// Called every event-loop tick (~50 ms) but only issues AppKit calls when
+/// the state actually changes, avoiding flicker and menu-click interference.
 pub fn update_icon(tray: &Tray, state: &AppState) {
     let recording = state.recording.load(Ordering::Relaxed);
-    let just_processed = state
+    let speaking = state.tts_speaking.load(Ordering::Relaxed);
+
+    let new_state = if recording {
+        IconState::Recording
+    } else if speaking {
+        IconState::Speaking
+    } else if state
         .just_processed
         .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
-        .is_ok();
-    let speaking = state.tts_speaking.load(Ordering::Relaxed);
+        .is_ok()
+    {
+        IconState::Processed
+    } else {
+        IconState::Idle
+    };
+
+    if new_state == tray.last_icon.get() {
+        return; // no transition — skip the AppKit calls entirely
+    }
+    tray.last_icon.set(new_state);
 
     // set_icon_as_template must be re-asserted after every set_icon call —
     // tray-icon 0.19 does not preserve it across swaps.
-    let (icon, template, tooltip) = if recording {
-        (recording_icon(), false, "callout — recording")
-    } else if just_processed {
-        (processed_icon(), false, "callout — heard you")
-    } else if speaking {
-        (speaking_icon(), false, "callout — speaking")
-    } else {
-        (mic_icon(), true, "callout")
+    let (icon, template, tooltip) = match new_state {
+        IconState::Recording => (recording_icon(), false, "callout — recording"),
+        IconState::Processed => (processed_icon(), false, "callout — heard you"),
+        IconState::Speaking => (speaking_icon(), false, "callout — speaking"),
+        IconState::Idle => (mic_icon(), true, "callout"),
     };
 
     tray.icon.set_icon(Some(icon)).ok();
@@ -123,32 +147,6 @@ pub fn update_menu(tray: &Tray, state: &AppState) {
     menu.append(&quit).ok();
 
     tray.icon.set_menu(Some(Box::new(menu)));
-}
-
-// Keep the combined fn for any callers that want both at once.
-pub fn update(tray: &Tray, state: &AppState) {
-    update_menu(tray, state);
-
-    let recording = state.recording.load(Ordering::Relaxed);
-    let just_processed = state
-        .just_processed
-        .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
-        .is_ok();
-    let speaking = state.tts_speaking.load(Ordering::Relaxed);
-
-    let (icon, template, tooltip) = if recording {
-        (recording_icon(), false, "callout — recording")
-    } else if just_processed {
-        (processed_icon(), false, "callout — heard you")
-    } else if speaking {
-        (speaking_icon(), false, "callout — speaking")
-    } else {
-        (mic_icon(), true, "callout")
-    };
-
-    tray.icon.set_icon(Some(icon)).ok();
-    tray.icon.set_icon_as_template(template);
-    tray.icon.set_tooltip(Some(tooltip)).ok();
 }
 
 fn initial_menu(ptt_label: &str, quit: &MenuItem) -> Menu {
