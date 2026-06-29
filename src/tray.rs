@@ -217,10 +217,10 @@ fn mic_icon() -> Icon {
 fn mic_with_badge(badge_rgba: [u8; 4]) -> Icon {
     const W: usize = 22;
     const H: usize = 22;
-    // Badge: small circle centred at (17, 4) with radius 3
+    // Badge: circle centred at (17, 5) with radius 4.5
     const BX: f32 = 17.5;
-    const BY: f32 = 3.5;
-    const BR: f32 = 3.0;
+    const BY: f32 = 4.5;
+    const BR: f32 = 4.5;
 
     let on = mic_pixels();
     let rgba: Vec<u8> = (0..H)
