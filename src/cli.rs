@@ -16,6 +16,13 @@ pub enum Command {
         #[command(subcommand)]
         cmd: VoicesCmd,
     },
+    /// Manage Whisper models
+    Model {
+        #[command(subcommand)]
+        cmd: ModelCmd,
+    },
+    /// Debug: show configured PTT hotkey
+    PttTest,
 }
 
 #[derive(Subcommand)]
@@ -29,4 +36,16 @@ pub enum VoicesCmd {
     },
     /// Open System Settings to download more voices
     Download,
+}
+
+#[derive(Subcommand)]
+pub enum ModelCmd {
+    /// Download a Whisper model
+    Download {
+        /// Model size: tiny (~75 MB), base (~148 MB), small (~488 MB)
+        #[arg(default_value = "base")]
+        size: String,
+    },
+    /// Show downloaded models and their paths
+    List,
 }

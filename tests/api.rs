@@ -1,7 +1,8 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use callout::{
-    agents::AgentRegistry, api, glossary::Glossary, router::AskRouter, AppState, Config,
+    agents::AgentRegistry, api, glossary::Glossary, recorder::Recorder, router::AskRouter,
+    AppState, Config,
 };
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -16,6 +17,8 @@ fn test_state() -> AppState {
         config: Arc::new(Config::default()),
         glossary: Arc::new(Glossary::default()),
         tts_tx,
+        ptt_recorder: Arc::new(Mutex::new(Recorder::default())),
+        transcriber: None,
     }
 }
 
