@@ -42,6 +42,8 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
 
     let receiver = GlobalHotKeyEvent::receiver();
     let mut recorder = Recorder::default();
+    // Captured at PTT press time so transcription resolves the correct ask.
+    let mut pressed_for: Option<String> = None;
 
     // Pre-open the CoreAudio stream so the first PTT press is instant.
     if let Err(e) = recorder.warm() {
@@ -58,11 +60,20 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
         }
         match event.state {
             HotKeyState::Pressed if !recorder.is_recording() => {
+                // Snapshot the pending ask NOW so transcription can't race
+                // against a new ask that arrives while Whisper is running.
+                pressed_for = state
+                    .router
+                    .blocking_lock()
+                    .pending_agent_ids()
+                    .next()
+                    .map(str::to_string);
                 // Interrupt any ongoing TTS before we start listening.
                 state.tts_kill.notify_one();
-                tracing::info!("PTT pressed — listening");
+                tracing::info!(target_ask = ?pressed_for, "PTT pressed — listening");
                 if let Err(e) = recorder.start() {
                     tracing::error!(error = %e, "failed to start recorder");
+                    pressed_for = None;
                 } else {
                     state.recording.store(true, Ordering::Relaxed);
                     // "Recording started" earcon — confirms the keypress registered.
@@ -76,10 +87,11 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
             HotKeyState::Released if recorder.is_recording() => {
                 state.recording.store(false, Ordering::Relaxed);
                 let audio = recorder.stop();
+                let target = pressed_for.take();
                 if audio.len() < 1600 {
                     tracing::warn!("PTT release: too short, ignoring");
                 } else {
-                    handle_audio(&state, &transcriber, audio);
+                    handle_audio(&state, &transcriber, audio, target);
                 }
             }
             _ => {}
@@ -87,21 +99,19 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
     }
 }
 
-fn handle_audio(state: &AppState, transcriber: &Transcriber, audio: Vec<f32>) {
-    let initial_prompt = {
-        let pending_id = state
-            .router
-            .blocking_lock()
-            .pending_agent_ids()
-            .next()
-            .map(str::to_string);
-        pending_id
-            .map(|id| {
-                let terms = state.agents.blocking_read().context_terms(&id);
-                state.glossary.whisper_prompt(&terms)
-            })
-            .unwrap_or_default()
-    };
+fn handle_audio(
+    state: &AppState,
+    transcriber: &Transcriber,
+    audio: Vec<f32>,
+    target_id: Option<String>,
+) {
+    let initial_prompt = target_id
+        .as_deref()
+        .map(|id| {
+            let terms = state.agents.blocking_read().context_terms(id);
+            state.glossary.whisper_prompt(&terms)
+        })
+        .unwrap_or_default();
 
     let transcript = match transcriber.transcribe(&audio, &initial_prompt) {
         Ok(t) if t.is_empty() => {
@@ -127,14 +137,14 @@ fn handle_audio(state: &AppState, transcriber: &Transcriber, audio: Vec<f32>) {
     let corrected = state.glossary.apply_corrections(&transcript);
 
     let mut router = state.router.blocking_lock();
-    let agent_ids: Vec<String> = router.pending_agent_ids().map(str::to_string).collect();
-
-    if let Some(id) = agent_ids.first() {
-        if router.resolve(id, corrected.clone()) {
+    if let Some(id) = target_id {
+        if router.resolve(&id, corrected.clone()) {
             tracing::info!(agent_id = %id, answer = %corrected, "ask resolved via PTT");
+        } else {
+            tracing::info!(agent_id = %id, "PTT: ask already resolved or timed out");
         }
     } else {
-        tracing::info!(transcript = %corrected, "PTT: no pending ask to resolve");
+        tracing::info!(transcript = %corrected, "PTT: no pending ask at press time, discarding");
     }
 }
 
