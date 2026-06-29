@@ -99,12 +99,16 @@ pub fn update(tray: &Tray, state: &AppState) {
 
     tray.icon.set_menu(Some(Box::new(menu)));
 
-    // Swap icon and tooltip based on recording state
+    // Swap icon and tooltip based on recording state.
+    // set_icon_as_template must be called after every set_icon — the flag
+    // is not preserved across icon swaps in tray-icon 0.19.
     if recording {
         tray.icon.set_icon(Some(recording_icon())).ok();
+        tray.icon.set_icon_as_template(false); // keep red in both modes
         tray.icon.set_tooltip(Some("callout — recording")).ok();
     } else {
         tray.icon.set_icon(Some(mic_icon())).ok();
+        tray.icon.set_icon_as_template(true); // white on dark, black on light
         tray.icon.set_tooltip(Some("callout")).ok();
     }
 }
