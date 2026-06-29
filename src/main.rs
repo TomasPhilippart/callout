@@ -14,12 +14,17 @@ fn main() -> anyhow::Result<()> {
 fn run_serve() -> anyhow::Result<()> {
     // global-hotkey and the tray icon both require the AppKit event loop on
     // the main thread.  Tokio runs on a named background thread instead.
+    //
+    // We send AppState through a channel so the main thread can read live
+    // agent and recording state for tray menu updates.
+    let (state_tx, state_rx) = std::sync::mpsc::sync_channel::<callout::AppState>(1);
+
     std::thread::Builder::new()
         .name("callout-tokio".into())
-        .spawn(|| {
+        .spawn(move || {
             if let Err(e) = tokio::runtime::Runtime::new()
                 .unwrap()
-                .block_on(callout::run())
+                .block_on(callout::run_with(state_tx))
             {
                 eprintln!("error: {e:#}");
                 std::process::exit(1);
@@ -27,28 +32,31 @@ fn run_serve() -> anyhow::Result<()> {
         })?;
 
     #[cfg(target_os = "macos")]
-    run_macos_main()?;
+    run_macos_main(state_rx)?;
 
     #[cfg(not(target_os = "macos"))]
-    std::thread::park();
+    {
+        let _ = state_rx;
+        std::thread::park();
+    }
 
     Ok(())
 }
 
 #[cfg(target_os = "macos")]
-fn run_macos_main() -> anyhow::Result<()> {
+fn run_macos_main(state_rx: std::sync::mpsc::Receiver<callout::AppState>) -> anyhow::Result<()> {
     use objc2::MainThreadMarker;
     use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSEventMask};
     use objc2_foundation::{NSDate, NSDefaultRunLoopMode};
 
-    // Give tokio a moment to start and register the hotkey.
+    // Give tokio a moment to start and register the global hotkey.
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     let mtm = MainThreadMarker::new().expect("must run on main thread");
     let app = NSApplication::sharedApplication(mtm);
     // Accessory: no Dock icon, doesn't steal focus.
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
-    // Sends applicationDidFinishLaunching; required before creating NSStatusItem.
+    // Required before creating NSStatusItem (tray icon).
     app.finishLaunching();
 
     let ptt_key = callout::Config::load()
@@ -57,9 +65,15 @@ fn run_macos_main() -> anyhow::Result<()> {
 
     let tray = callout::tray::build(&ptt_key)?;
 
-    // NSEvent global monitors (used by global-hotkey) only fire when the
-    // AppKit event queue is drained via nextEventMatchingMask:…  CFRunLoopRun
-    // alone is not enough — we must call this method the way app.run() does.
+    // Wait for AppState (sent after Whisper loads, usually ~2 s)
+    let app_state = state_rx
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .ok();
+
+    // NSEvent global monitors (used by global-hotkey) only fire when AppKit's
+    // event queue is drained via nextEventMatchingMask:… — CFRunLoopRunInMode
+    // alone does not call this, so hotkeys would silently stop working.
+    let mut tick: u32 = 0;
     loop {
         let event = unsafe {
             app.nextEventMatchingMask_untilDate_inMode_dequeue(
@@ -75,6 +89,14 @@ fn run_macos_main() -> anyhow::Result<()> {
 
         if callout::tray::poll(&tray) {
             std::process::exit(0);
+        }
+
+        // Refresh tray menu every ~500 ms (every 10 × 50 ms iterations).
+        tick = tick.wrapping_add(1);
+        if tick.is_multiple_of(10) {
+            if let Some(state) = &app_state {
+                callout::tray::update(&tray, state);
+            }
         }
     }
 }

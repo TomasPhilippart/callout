@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{atomic::AtomicBool, Arc};
 use tokio::sync::{mpsc, Mutex, RwLock};
 
 pub mod agents;
@@ -29,9 +29,21 @@ pub struct AppState {
     pub ptt_recorder: Arc<Mutex<recorder::Recorder>>,
     /// Whisper transcriber — None if model not loaded
     pub transcriber: Option<Arc<transcriber::Transcriber>>,
+    /// True while the PTT thread is actively capturing audio
+    pub recording: Arc<AtomicBool>,
 }
 
 pub async fn run() -> anyhow::Result<()> {
+    run_inner(None).await
+}
+
+/// Like `run()` but sends a clone of AppState once it is ready.
+/// Used by the macOS main thread to read live agent/recording state for the tray.
+pub async fn run_with(tx: std::sync::mpsc::SyncSender<AppState>) -> anyhow::Result<()> {
+    run_inner(Some(tx)).await
+}
+
+async fn run_inner(state_tx: Option<std::sync::mpsc::SyncSender<AppState>>) -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -79,7 +91,13 @@ pub async fn run() -> anyhow::Result<()> {
         tts_tx,
         ptt_recorder: Arc::new(Mutex::new(recorder::Recorder::default())),
         transcriber,
+        recording: Arc::new(AtomicBool::new(false)),
     };
+
+    // Send AppState to the main thread (for tray updates) before serving
+    if let Some(tx) = state_tx {
+        tx.send(state.clone()).ok();
+    }
 
     // Agent stale-pruning task
     {

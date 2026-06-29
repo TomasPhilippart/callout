@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
 
 use global_hotkey::{
     hotkey::{Code, HotKey, Modifiers},
@@ -53,9 +53,12 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
                     tracing::info!("PTT pressed — listening");
                     if let Err(e) = recorder.start() {
                         tracing::error!(error = %e, "failed to start recorder");
+                    } else {
+                        state.recording.store(true, Ordering::Relaxed);
                     }
                 }
                 HotKeyState::Released if recorder.is_recording() => {
+                    state.recording.store(false, Ordering::Relaxed);
                     let audio = recorder.stop();
                     if audio.len() < 1600 {
                         tracing::warn!("PTT release: too short, ignoring");

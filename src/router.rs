@@ -61,6 +61,10 @@ impl AskRouter {
     pub fn pending_agent_ids(&self) -> impl Iterator<Item = &str> {
         self.pending.keys().map(String::as_str)
     }
+
+    pub fn pending_question(&self, agent_id: &str) -> Option<&str> {
+        self.pending.get(agent_id).map(|a| a.question.as_str())
+    }
 }
 
 fn match_choice<'a>(choices: &'a [Choice], transcript: &str) -> Option<&'a str> {
