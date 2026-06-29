@@ -2,6 +2,12 @@ use std::sync::Arc;
 use tokio::sync::Notify;
 
 pub async fn speak(text: &str, voice: &str, kill: &Arc<Notify>) {
+    // Drain any stale permit left by a PTT press that happened while nothing
+    // was speaking — otherwise the next speak() would be killed immediately.
+    tokio::time::timeout(std::time::Duration::ZERO, kill.notified())
+        .await
+        .ok();
+
     tracing::info!(text = %text, voice = %voice, "speaking");
 
     #[cfg(target_os = "macos")]
