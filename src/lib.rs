@@ -12,6 +12,8 @@ pub mod recorder;
 pub mod router;
 pub mod speaker;
 pub mod transcriber;
+#[cfg(target_os = "macos")]
+pub mod tray;
 pub mod voices;
 
 pub use config::Config;
