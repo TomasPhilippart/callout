@@ -3,8 +3,6 @@
 Ambient voice interface for AI agents on macOS. Runs silently in the background —
 speaks up when an agent needs a decision, listens for your reply, routes the answer back.
 
-<img src="docs/mockup.png" width="380" alt="Callout menu bar mockup" />
-
 ## Quick start
 
 **1. Install**
