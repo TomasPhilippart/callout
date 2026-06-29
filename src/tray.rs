@@ -99,18 +99,28 @@ pub fn update(tray: &Tray, state: &AppState) {
 
     tray.icon.set_menu(Some(Box::new(menu)));
 
-    // Swap icon and tooltip based on recording state.
-    // set_icon_as_template must be called after every set_icon — the flag
-    // is not preserved across icon swaps in tray-icon 0.19.
-    if recording {
-        tray.icon.set_icon(Some(recording_icon())).ok();
-        tray.icon.set_icon_as_template(false); // keep red in both modes
-        tray.icon.set_tooltip(Some("callout — recording")).ok();
+    // Icon priority: recording > just_processed > speaking > idle.
+    // set_icon_as_template must be re-asserted after every set_icon call —
+    // tray-icon 0.19 does not preserve it across swaps.
+    let just_processed = state
+        .just_processed
+        .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok();
+    let speaking = state.tts_speaking.load(Ordering::Relaxed);
+
+    let (icon, template, tooltip) = if recording {
+        (recording_icon(), false, "callout — recording")
+    } else if just_processed {
+        (processed_icon(), false, "callout — heard you")
+    } else if speaking {
+        (speaking_icon(), false, "callout — speaking")
     } else {
-        tray.icon.set_icon(Some(mic_icon())).ok();
-        tray.icon.set_icon_as_template(true); // white on dark, black on light
-        tray.icon.set_tooltip(Some("callout")).ok();
-    }
+        (mic_icon(), true, "callout")
+    };
+
+    tray.icon.set_icon(Some(icon)).ok();
+    tray.icon.set_icon_as_template(template);
+    tray.icon.set_tooltip(Some(tooltip)).ok();
 }
 
 fn initial_menu(ptt_label: &str, quit: &MenuItem) -> Menu {
@@ -157,12 +167,8 @@ fn format_hotkey(s: &str) -> String {
 
 // ── Icons ────────────────────────────────────────────────────────────────────
 
-/// Template mic icon — macOS inverts it automatically for dark/light mode.
-fn mic_icon() -> Icon {
-    const W: usize = 22;
-    const H: usize = 22;
-    let mut on = [[false; W]; H];
-
+fn mic_pixels() -> [[bool; 22]; 22] {
+    let mut on = [[false; 22usize]; 22usize];
     // Capsule body: rows 2–11, cols 7–14 (rounded top corners removed)
     on.iter_mut()
         .enumerate()
@@ -191,36 +197,58 @@ fn mic_icon() -> Icon {
     });
     // Base
     on[18].iter_mut().skip(8).take(6).for_each(|px| *px = true);
+    on
+}
 
+/// Template mic icon — macOS inverts it automatically for dark/light mode.
+fn mic_icon() -> Icon {
+    let on = mic_pixels();
     let rgba: Vec<u8> = on
         .iter()
         .flatten()
         .flat_map(|&p| if p { [0u8, 0, 0, 255] } else { [0u8, 0, 0, 0] })
         .collect();
-
-    Icon::from_rgba(rgba, W as u32, H as u32).expect("valid icon dimensions")
+    Icon::from_rgba(rgba, 22, 22).expect("valid icon dimensions")
 }
 
-/// Solid red circle — NOT a template so it stays red in both modes.
-fn recording_icon() -> Icon {
+/// Mic with a small filled dot badge in the top-right corner.
+/// The mic body is drawn in white (not template) so the badge color is preserved.
+/// badge_rgba: [r, g, b, a] for the dot color.
+fn mic_with_badge(badge_rgba: [u8; 4]) -> Icon {
     const W: usize = 22;
     const H: usize = 22;
-    let cx = W as f32 / 2.0;
-    let cy = H as f32 / 2.0;
+    // Badge: small circle centred at (17, 4) with radius 3
+    const BX: f32 = 17.5;
+    const BY: f32 = 3.5;
+    const BR: f32 = 3.0;
 
+    let on = mic_pixels();
     let rgba: Vec<u8> = (0..H)
         .flat_map(|y| {
             (0..W).flat_map(move |x| {
-                let dx = x as f32 + 0.5 - cx;
-                let dy = y as f32 + 0.5 - cy;
-                if (dx * dx + dy * dy).sqrt() < 8.0 {
-                    [220u8, 38, 38, 255] // red-600
+                let dx = x as f32 + 0.5 - BX;
+                let dy = y as f32 + 0.5 - BY;
+                if dx * dx + dy * dy < BR * BR {
+                    badge_rgba
+                } else if on[y][x] {
+                    [255u8, 255, 255, 255] // white mic body (non-template)
                 } else {
                     [0u8, 0, 0, 0]
                 }
             })
         })
         .collect();
-
     Icon::from_rgba(rgba, W as u32, H as u32).expect("valid icon dimensions")
+}
+
+fn recording_icon() -> Icon {
+    mic_with_badge([220, 38, 38, 255]) // red
+}
+
+fn speaking_icon() -> Icon {
+    mic_with_badge([251, 146, 60, 255]) // orange
+}
+
+fn processed_icon() -> Icon {
+    mic_with_badge([34, 197, 94, 255]) // green
 }

@@ -1,7 +1,10 @@
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use tokio::sync::Notify;
 
-pub async fn speak(text: &str, voice: &str, kill: &Arc<Notify>) {
+pub async fn speak(text: &str, voice: &str, kill: &Arc<Notify>, speaking: &Arc<AtomicBool>) {
     // Drain any stale permit left by a PTT press that happened while nothing
     // was speaking — otherwise the next speak() would be killed immediately.
     tokio::time::timeout(std::time::Duration::ZERO, kill.notified())
@@ -30,6 +33,8 @@ pub async fn speak(text: &str, voice: &str, kill: &Arc<Notify>) {
             }
         };
 
+        speaking.store(true, Ordering::Relaxed);
+
         tokio::select! {
             status = child.wait() => {
                 match status {
@@ -44,11 +49,13 @@ pub async fn speak(text: &str, voice: &str, kill: &Arc<Notify>) {
                 tracing::info!("TTS interrupted by barge-in");
             }
         }
+
+        speaking.store(false, Ordering::Relaxed);
     }
 
     #[cfg(target_os = "linux")]
     {
-        let _ = kill;
+        let _ = (kill, speaking);
         tracing::info!(text = %text, "TTS stub (Linux piper not yet configured)");
     }
 }

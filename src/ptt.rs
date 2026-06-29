@@ -127,12 +127,13 @@ fn handle_audio(
 
     tracing::info!(transcript = %transcript, "transcribed");
 
-    // Play earcon so the user knows their speech was received.
+    // Play earcon and pulse the processed badge for one tray-update cycle.
     #[cfg(target_os = "macos")]
     std::process::Command::new("afplay")
         .arg("/System/Library/Sounds/Glass.aiff")
         .spawn()
         .ok();
+    state.just_processed.store(true, Ordering::Relaxed);
 
     let corrected = state.glossary.apply_corrections(&transcript);
 

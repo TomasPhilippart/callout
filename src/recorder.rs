@@ -20,14 +20,9 @@ struct Live {
     channels: u16,
 }
 
+#[derive(Default)]
 pub struct Recorder {
     live: Option<Live>,
-}
-
-impl Default for Recorder {
-    fn default() -> Self {
-        Self { live: None }
-    }
 }
 
 impl Recorder {

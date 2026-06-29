@@ -20,6 +20,8 @@ fn test_state() -> AppState {
         ptt_recorder: Arc::new(Mutex::new(Recorder::default())),
         transcriber: None,
         recording: Arc::new(AtomicBool::new(false)),
+        tts_speaking: Arc::new(AtomicBool::new(false)),
+        just_processed: Arc::new(AtomicBool::new(false)),
         tts_kill: Arc::new(Notify::new()),
     }
 }
