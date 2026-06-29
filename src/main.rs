@@ -91,11 +91,13 @@ fn run_macos_main(state_rx: std::sync::mpsc::Receiver<callout::AppState>) -> any
             std::process::exit(0);
         }
 
-        // Refresh tray menu every ~500 ms (every 10 × 50 ms iterations).
         tick = tick.wrapping_add(1);
-        if tick.is_multiple_of(10) {
-            if let Some(state) = &app_state {
-                callout::tray::update(&tray, state);
+        if let Some(state) = &app_state {
+            // Icon/tooltip: every tick (~50 ms) for instant feedback on PTT press.
+            callout::tray::update_icon(&tray, state);
+            // Menu (needs locks): every 10 ticks (~500 ms) is plenty.
+            if tick.is_multiple_of(10) {
+                callout::tray::update_menu(&tray, state);
             }
         }
     }

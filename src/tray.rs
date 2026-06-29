@@ -42,12 +42,38 @@ pub fn poll(tray: &Tray) -> bool {
     false
 }
 
-/// Rebuild the menu and icon to reflect current agent + recording state.
-/// Called periodically from the main-thread event loop (~500 ms).
-pub fn update(tray: &Tray, state: &AppState) {
+/// Update only the icon and tooltip — reads only atomics, no locks.
+/// Called every event-loop tick (~50 ms) for near-instant visual feedback.
+pub fn update_icon(tray: &Tray, state: &AppState) {
+    let recording = state.recording.load(Ordering::Relaxed);
+    let just_processed = state
+        .just_processed
+        .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok();
+    let speaking = state.tts_speaking.load(Ordering::Relaxed);
+
+    // set_icon_as_template must be re-asserted after every set_icon call —
+    // tray-icon 0.19 does not preserve it across swaps.
+    let (icon, template, tooltip) = if recording {
+        (recording_icon(), false, "callout — recording")
+    } else if just_processed {
+        (processed_icon(), false, "callout — heard you")
+    } else if speaking {
+        (speaking_icon(), false, "callout — speaking")
+    } else {
+        (mic_icon(), true, "callout")
+    };
+
+    tray.icon.set_icon(Some(icon)).ok();
+    tray.icon.set_icon_as_template(template);
+    tray.icon.set_tooltip(Some(tooltip)).ok();
+}
+
+/// Rebuild the full menu with live agent list.
+/// Called every ~500 ms — takes brief locks on agents and router.
+pub fn update_menu(tray: &Tray, state: &AppState) {
     let recording = state.recording.load(Ordering::Relaxed);
 
-    // Build agent rows — read locks are brief
     let agents = state.agents.blocking_read();
     let router = state.router.blocking_lock();
     let agent_rows: Vec<(String, AgentState, Option<String>)> = agents
@@ -63,7 +89,6 @@ pub fn update(tray: &Tray, state: &AppState) {
     drop(router);
     drop(agents);
 
-    // Rebuild menu
     let quit = MenuItem::new("Quit callout", true, None);
     let menu = Menu::new();
 
@@ -98,10 +123,13 @@ pub fn update(tray: &Tray, state: &AppState) {
     menu.append(&quit).ok();
 
     tray.icon.set_menu(Some(Box::new(menu)));
+}
 
-    // Icon priority: recording > just_processed > speaking > idle.
-    // set_icon_as_template must be re-asserted after every set_icon call —
-    // tray-icon 0.19 does not preserve it across swaps.
+// Keep the combined fn for any callers that want both at once.
+pub fn update(tray: &Tray, state: &AppState) {
+    update_menu(tray, state);
+
+    let recording = state.recording.load(Ordering::Relaxed);
     let just_processed = state
         .just_processed
         .compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
