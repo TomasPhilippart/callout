@@ -32,10 +32,12 @@ rubato        = "0.15"
 whisper-rs    = "0.11"
 global-hotkey = "0.6"
 
-# macOS event loop for AppKit / global-hotkey event delivery
+# macOS: event loop (AppKit), global-hotkey, tray icon
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2         = "0.6"
-objc2-app-kit = "0.3"
+objc2            = "0.6"
+objc2-app-kit    = "0.3"
+objc2-foundation = "0.3"
+tray-icon        = "0.19"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

@@ -12,9 +12,8 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn run_serve() -> anyhow::Result<()> {
-    // global-hotkey delivers keyboard events via NSApplication on macOS.
-    // NSApplication.run() must own the main thread, so tokio runs on a
-    // named background thread instead.
+    // global-hotkey and the tray icon both require the AppKit event loop on
+    // the main thread.  Tokio runs on a named background thread instead.
     std::thread::Builder::new()
         .name("callout-tokio".into())
         .spawn(|| {
@@ -28,21 +27,7 @@ fn run_serve() -> anyhow::Result<()> {
         })?;
 
     #[cfg(target_os = "macos")]
-    {
-        use objc2::MainThreadMarker;
-        use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
-
-        // Give the tokio thread a moment to start and register the hotkey
-        // before the event loop begins consuming events.
-        std::thread::sleep(std::time::Duration::from_millis(200));
-
-        let mtm = MainThreadMarker::new().expect("must run on main thread");
-        let app = NSApplication::sharedApplication(mtm);
-        // Accessory: no Dock icon, no menu bar, doesn't steal focus
-        app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
-        // Blocks forever, pumping AppKit events — required for global-hotkey
-        app.run();
-    }
+    run_macos_main()?;
 
     #[cfg(not(target_os = "macos"))]
     std::thread::park();
@@ -50,10 +35,54 @@ fn run_serve() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+fn run_macos_main() -> anyhow::Result<()> {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSEventMask};
+    use objc2_foundation::{NSDate, NSDefaultRunLoopMode};
+
+    // Give tokio a moment to start and register the hotkey.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    let mtm = MainThreadMarker::new().expect("must run on main thread");
+    let app = NSApplication::sharedApplication(mtm);
+    // Accessory: no Dock icon, doesn't steal focus.
+    app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    // Sends applicationDidFinishLaunching; required before creating NSStatusItem.
+    app.finishLaunching();
+
+    let ptt_key = callout::Config::load()
+        .map(|c| c.hotkey.ptt)
+        .unwrap_or_else(|_| "Alt+K".into());
+
+    let tray = callout::tray::build(&ptt_key)?;
+
+    // NSEvent global monitors (used by global-hotkey) only fire when the
+    // AppKit event queue is drained via nextEventMatchingMask:…  CFRunLoopRun
+    // alone is not enough — we must call this method the way app.run() does.
+    loop {
+        let event = unsafe {
+            app.nextEventMatchingMask_untilDate_inMode_dequeue(
+                NSEventMask(u64::MAX),
+                Some(&NSDate::dateWithTimeIntervalSinceNow(0.05)),
+                NSDefaultRunLoopMode,
+                true,
+            )
+        };
+        if let Some(event) = event {
+            app.sendEvent(&event);
+        }
+
+        if callout::tray::poll(&tray) {
+            std::process::exit(0);
+        }
+    }
+}
+
 fn ptt_test() -> anyhow::Result<()> {
     let config = callout::Config::load()?;
     println!(
-        "PTT key: \"{}\" — use global-hotkey; check Input Monitoring if it doesn't respond.",
+        "PTT key: \"{}\" — check Input Monitoring in System Settings if it doesn't respond.",
         config.hotkey.ptt
     );
     Ok(())
