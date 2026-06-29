@@ -15,7 +15,10 @@ pub async fn speak(text: &str, voice: &str, kill: &Arc<Notify>, speaking: &Arc<A
 
     #[cfg(target_os = "macos")]
     {
+        speaking.store(true, Ordering::Relaxed);
+
         // "Attention" earcon — plays before speech so the user knows to listen.
+        // speaking is already true so the tray shows the orange dot during the earcon.
         let _ = std::process::Command::new("afplay")
             .arg("/System/Library/Sounds/Purr.aiff")
             .status();
@@ -29,11 +32,10 @@ pub async fn speak(text: &str, voice: &str, kill: &Arc<Notify>, speaking: &Arc<A
             Ok(c) => c,
             Err(e) => {
                 tracing::error!(text = %text, error = %e, "failed to spawn say");
+                speaking.store(false, Ordering::Relaxed);
                 return;
             }
         };
-
-        speaking.store(true, Ordering::Relaxed);
 
         tokio::select! {
             status = child.wait() => {

@@ -7,6 +7,9 @@ use global_hotkey::{
 
 use crate::{recorder::Recorder, transcriber::Transcriber, AppState};
 
+/// 16 kHz mono: 0.1 s minimum to avoid transcribing accidental key taps.
+const MIN_SAMPLES: usize = 1_600;
+
 pub fn spawn(state: AppState, transcriber: Arc<Transcriber>) {
     std::thread::Builder::new()
         .name("callout-ptt".into())
@@ -65,7 +68,6 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
                 if recorder.is_recording() {
                     recorder.stop();
                     state.recording.store(false, Ordering::Relaxed);
-                    pressed_for = None;
                     tracing::warn!("PTT: discarding stuck recording (key-up was lost)");
                 }
                 // Snapshot the pending ask NOW so transcription can't race
@@ -96,7 +98,7 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
                 state.recording.store(false, Ordering::Relaxed);
                 let audio = recorder.stop();
                 let target = pressed_for.take();
-                if audio.len() < 1600 {
+                if audio.len() < MIN_SAMPLES {
                     tracing::warn!("PTT release: too short, ignoring");
                 } else {
                     handle_audio(&state, &transcriber, audio, target);

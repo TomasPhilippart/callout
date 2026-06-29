@@ -63,14 +63,16 @@ async fn run_inner(state_tx: Option<std::sync::mpsc::SyncSender<AppState>>) -> a
     let (tts_tx, mut tts_rx) = mpsc::channel::<String>(32);
     let tts_voice = config.tts.voice.clone();
     let tts_kill = Arc::new(Notify::new());
-    let tts_kill_task = tts_kill.clone();
-    let tts_speaking_task: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-    let tts_speaking = tts_speaking_task.clone();
-    tokio::spawn(async move {
-        while let Some(text) = tts_rx.recv().await {
-            speaker::speak(&text, &tts_voice, &tts_kill_task, &tts_speaking_task).await;
-        }
-    });
+    let tts_speaking: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    {
+        let tts_kill = tts_kill.clone();
+        let tts_speaking = tts_speaking.clone();
+        tokio::spawn(async move {
+            while let Some(text) = tts_rx.recv().await {
+                speaker::speak(&text, &tts_voice, &tts_kill, &tts_speaking).await;
+            }
+        });
+    }
 
     // Load Whisper model if available
     let model_path = Config::model_path(&config.model);

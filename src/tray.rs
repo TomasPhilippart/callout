@@ -1,5 +1,7 @@
-use std::cell::RefCell;
-use std::{cell::Cell, sync::atomic::Ordering};
+use std::{
+    cell::{Cell, RefCell},
+    sync::atomic::Ordering,
+};
 
 use tray_icon::{
     menu::{Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem},
@@ -34,11 +36,14 @@ struct MenuSnapshot {
 
 pub fn build(ptt_key: &str) -> anyhow::Result<Tray> {
     let ptt_label = format_hotkey(ptt_key);
-    let quit = MenuItem::new("Quit callout", true, None);
-    let quit_id = quit.id().clone();
+    let quit_id = MenuId::new("quit");
 
     let tray = TrayIconBuilder::new()
-        .with_menu(Box::new(initial_menu(&ptt_label, &quit)))
+        .with_menu(Box::new(build_menu(
+            &ptt_label,
+            &quit_id,
+            &MenuSnapshot::default(),
+        )))
         .with_tooltip("callout")
         .with_icon(mic_icon())
         .with_icon_as_template(true)
@@ -115,9 +120,7 @@ pub fn update_menu(tray: &Tray, state: &AppState) {
         .all()
         .iter()
         .map(|a| {
-            let question = router
-                .pending_question(&a.id)
-                .map(|q| truncate(q, 30).to_string());
+            let question = router.pending_question(&a.id).map(|q| truncate(q, 30));
             (a.name.clone(), a.state.clone(), question)
         })
         .collect();
@@ -129,7 +132,17 @@ pub fn update_menu(tray: &Tray, state: &AppState) {
         return; // nothing changed — leave the menu alone
     }
 
-    let quit = MenuItem::new("Quit callout", true, None);
+    tray.icon.set_menu(Some(Box::new(build_menu(
+        &tray.ptt_label,
+        &tray.quit_id,
+        &snapshot,
+    ))));
+    *tray.last_menu.borrow_mut() = snapshot;
+}
+
+/// Build a fresh menu from the given snapshot.
+/// Uses the stable `quit_id` so Quit events always match `poll()`'s check.
+fn build_menu(ptt_label: &str, quit_id: &MenuId, snapshot: &MenuSnapshot) -> Menu {
     let menu = Menu::new();
 
     if snapshot.recording {
@@ -154,44 +167,35 @@ pub fn update_menu(tray: &Tray, state: &AppState) {
 
     menu.append(&PredefinedMenuItem::separator()).ok();
     menu.append(&MenuItem::new(
-        format!("Hold {} to speak", tray.ptt_label),
-        false,
-        None,
-    ))
-    .ok();
-    menu.append(&PredefinedMenuItem::separator()).ok();
-    menu.append(&quit).ok();
-
-    tray.icon.set_menu(Some(Box::new(menu)));
-    *tray.last_menu.borrow_mut() = snapshot;
-}
-
-fn initial_menu(ptt_label: &str, quit: &MenuItem) -> Menu {
-    let menu = Menu::new();
-    menu.append(&MenuItem::new("No agents connected", false, None))
-        .ok();
-    menu.append(&PredefinedMenuItem::separator()).ok();
-    menu.append(&MenuItem::new(
         format!("Hold {ptt_label} to speak"),
         false,
         None,
     ))
     .ok();
     menu.append(&PredefinedMenuItem::separator()).ok();
-    menu.append(quit).ok();
+    // Reuse the stable quit_id so poll() can always recognise the Quit item.
+    menu.append(&MenuItem::with_id(
+        quit_id.clone(),
+        "Quit callout",
+        true,
+        None,
+    ))
+    .ok();
+
     menu
 }
 
-/// Truncate to at most `max_chars` chars, appending "…" if cut.
-fn truncate(s: &str, max_chars: usize) -> &str {
+/// Return `s` unchanged if ≤ `max_chars`, otherwise truncate and append "…".
+fn truncate(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
-        s
+        s.to_string()
     } else {
-        // Find byte position of the max_chars-th char boundary
-        s.char_indices()
+        let end = s
+            .char_indices()
             .nth(max_chars)
-            .map(|(i, _)| &s[..i])
-            .unwrap_or(s)
+            .map(|(i, _)| i)
+            .unwrap_or(s.len());
+        format!("{}…", &s[..end])
     }
 }
 
