@@ -59,7 +59,15 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
             continue;
         }
         match event.state {
-            HotKeyState::Pressed if !recorder.is_recording() => {
+            HotKeyState::Pressed => {
+                // If the key-up was lost (e.g. menu was open and swallowed it),
+                // the recorder may still think it's recording. Reset before starting fresh.
+                if recorder.is_recording() {
+                    recorder.stop();
+                    state.recording.store(false, Ordering::Relaxed);
+                    pressed_for = None;
+                    tracing::warn!("PTT: discarding stuck recording (key-up was lost)");
+                }
                 // Snapshot the pending ask NOW so transcription can't race
                 // against a new ask that arrives while Whisper is running.
                 pressed_for = state
