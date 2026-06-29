@@ -58,6 +58,8 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
         }
         match event.state {
             HotKeyState::Pressed if !recorder.is_recording() => {
+                // Interrupt any ongoing TTS before we start listening.
+                state.tts_kill.notify_one();
                 tracing::info!("PTT pressed — listening");
                 if let Err(e) = recorder.start() {
                     tracing::error!(error = %e, "failed to start recorder");
@@ -108,6 +110,13 @@ fn handle_audio(state: &AppState, transcriber: &Transcriber, audio: Vec<f32>) {
     };
 
     tracing::info!(transcript = %transcript, "transcribed");
+
+    // Play earcon so the user knows their speech was received.
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("afplay")
+        .arg("/System/Library/Sounds/Glass.aiff")
+        .spawn()
+        .ok();
 
     let corrected = state.glossary.apply_corrections(&transcript);
 

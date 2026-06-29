@@ -1,5 +1,5 @@
 use std::sync::{atomic::AtomicBool, Arc};
-use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::sync::{mpsc, Mutex, Notify, RwLock};
 
 pub mod agents;
 pub mod api;
@@ -31,6 +31,8 @@ pub struct AppState {
     pub transcriber: Option<Arc<transcriber::Transcriber>>,
     /// True while the PTT thread is actively capturing audio
     pub recording: Arc<AtomicBool>,
+    /// Signal the TTS task to interrupt the current `say` process (barge-in)
+    pub tts_kill: Arc<Notify>,
 }
 
 pub async fn run() -> anyhow::Result<()> {
@@ -56,9 +58,11 @@ async fn run_inner(state_tx: Option<std::sync::mpsc::SyncSender<AppState>>) -> a
 
     let (tts_tx, mut tts_rx) = mpsc::channel::<String>(32);
     let tts_voice = config.tts.voice.clone();
+    let tts_kill = Arc::new(Notify::new());
+    let tts_kill_task = tts_kill.clone();
     tokio::spawn(async move {
         while let Some(text) = tts_rx.recv().await {
-            speaker::speak(&text, &tts_voice).await;
+            speaker::speak(&text, &tts_voice, &tts_kill_task).await;
         }
     });
 
@@ -92,6 +96,7 @@ async fn run_inner(state_tx: Option<std::sync::mpsc::SyncSender<AppState>>) -> a
         ptt_recorder: Arc::new(Mutex::new(recorder::Recorder::default())),
         transcriber,
         recording: Arc::new(AtomicBool::new(false)),
+        tts_kill,
     };
 
     // Send AppState to the main thread (for tray updates) before serving
