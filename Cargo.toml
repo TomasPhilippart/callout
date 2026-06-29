@@ -12,19 +12,30 @@ name = "callout"
 path = "src/lib.rs"
 
 [dependencies]
-tokio       = { version = "1",   features = ["full"] }
-axum        = "0.7"
-serde       = { version = "1",   features = ["derive"] }
-serde_json  = "1"
-toml        = "0.8"
-uuid        = { version = "1",   features = ["v4"] }
-anyhow      = "1"
-tracing     = "0.1"
+tokio        = { version = "1",    features = ["full"] }
+axum         = "0.7"
+serde        = { version = "1",    features = ["derive"] }
+serde_json   = "1"
+toml         = "0.8"
+toml_edit    = "0.22"
+uuid         = { version = "1",    features = ["v4"] }
+anyhow       = "1"
+tracing      = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-dirs        = "5"
-strsim      = "0.11"
-clap        = { version = "4", features = ["derive"] }
-toml_edit   = "0.22"
+dirs         = "5"
+strsim       = "0.11"
+clap         = { version = "4",    features = ["derive"] }
+
+# Audio pipeline (Phase 2)
+cpal          = "0.15"
+rubato        = "0.15"
+whisper-rs    = "0.11"
+global-hotkey = "0.6"
+
+# macOS event loop for AppKit / global-hotkey event delivery
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2         = "0.6"
+objc2-app-kit = "0.3"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

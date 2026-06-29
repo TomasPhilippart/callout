@@ -6,6 +6,7 @@ use std::path::PathBuf;
 pub struct Config {
     #[serde(default = "default_port")]
     pub port: u16,
+    /// Whisper model size: tiny, base, small, medium, large
     #[serde(default = "default_model")]
     pub model: String,
     #[serde(default)]
@@ -18,8 +19,10 @@ pub struct Config {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct HotkeyConfig {
-    #[serde(default = "default_key")]
-    pub key: String,
+    /// PTT hotkey string. Supports modifiers: Alt, Ctrl, Shift, Meta.
+    /// Examples: "F5", "Alt+Space", "Ctrl+Shift+K"
+    #[serde(default = "default_ptt_key")]
+    pub ptt: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -31,20 +34,6 @@ pub struct TtsConfig {
     pub piper_bin: Option<String>,
     /// Linux: path to piper voice model.
     pub piper_voice: Option<String>,
-}
-
-fn default_voice() -> String {
-    "Samantha".into()
-}
-
-impl Default for TtsConfig {
-    fn default() -> Self {
-        Self {
-            voice: default_voice(),
-            piper_bin: None,
-            piper_voice: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -63,8 +52,11 @@ fn default_port() -> u16 {
 fn default_model() -> String {
     "base".into()
 }
-fn default_key() -> String {
-    "Alt".into()
+fn default_ptt_key() -> String {
+    "Alt+K".into()
+}
+fn default_voice() -> String {
+    "Samantha".into()
 }
 fn default_prune_interval_secs() -> u64 {
     60
@@ -87,7 +79,19 @@ impl Default for Config {
 
 impl Default for HotkeyConfig {
     fn default() -> Self {
-        Self { key: default_key() }
+        Self {
+            ptt: default_ptt_key(),
+        }
+    }
+}
+
+impl Default for TtsConfig {
+    fn default() -> Self {
+        Self {
+            voice: default_voice(),
+            piper_bin: None,
+            piper_voice: None,
+        }
     }
 }
 
@@ -113,5 +117,13 @@ impl Config {
 
     pub fn dir() -> PathBuf {
         dirs::home_dir().unwrap_or_default().join(".callout")
+    }
+
+    pub fn models_dir() -> PathBuf {
+        Self::dir().join("models")
+    }
+
+    pub fn model_path(size: &str) -> PathBuf {
+        Self::models_dir().join(format!("ggml-{size}.bin"))
     }
 }

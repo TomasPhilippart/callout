@@ -9,6 +9,7 @@ pub mod error;
 mod agents;
 mod ask;
 mod notify;
+mod ptt;
 mod status;
 
 pub use error::AppError;
@@ -20,6 +21,9 @@ pub fn build_app(state: AppState) -> Router {
         .route("/ask", post(ask::ask))
         .route("/notify", post(notify::notify))
         .route("/status", get(status::status))
+        .route("/ptt/start", post(ptt::start))
+        .route("/ptt/stop", post(ptt::stop))
+        .route("/ptt/toggle", post(ptt::toggle))
         .with_state(state)
 }
 
