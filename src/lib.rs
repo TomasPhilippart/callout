@@ -1,5 +1,5 @@
-use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex, RwLock};
+use std::sync::{atomic::AtomicBool, Arc};
+use tokio::sync::{mpsc, Mutex, Notify, RwLock};
 
 pub mod agents;
 pub mod api;
@@ -29,9 +29,27 @@ pub struct AppState {
     pub ptt_recorder: Arc<Mutex<recorder::Recorder>>,
     /// Whisper transcriber — None if model not loaded
     pub transcriber: Option<Arc<transcriber::Transcriber>>,
+    /// True while the PTT thread is actively capturing audio
+    pub recording: Arc<AtomicBool>,
+    /// True while say(1) is speaking
+    pub tts_speaking: Arc<AtomicBool>,
+    /// Pulses true for one tray-update cycle after a successful transcription
+    pub just_processed: Arc<AtomicBool>,
+    /// Signal the TTS task to interrupt the current `say` process (barge-in)
+    pub tts_kill: Arc<Notify>,
 }
 
 pub async fn run() -> anyhow::Result<()> {
+    run_inner(None).await
+}
+
+/// Like `run()` but sends a clone of AppState once it is ready.
+/// Used by the macOS main thread to read live agent/recording state for the tray.
+pub async fn run_with(tx: std::sync::mpsc::SyncSender<AppState>) -> anyhow::Result<()> {
+    run_inner(Some(tx)).await
+}
+
+async fn run_inner(state_tx: Option<std::sync::mpsc::SyncSender<AppState>>) -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -44,11 +62,17 @@ pub async fn run() -> anyhow::Result<()> {
 
     let (tts_tx, mut tts_rx) = mpsc::channel::<String>(32);
     let tts_voice = config.tts.voice.clone();
-    tokio::spawn(async move {
-        while let Some(text) = tts_rx.recv().await {
-            speaker::speak(&text, &tts_voice).await;
-        }
-    });
+    let tts_kill = Arc::new(Notify::new());
+    let tts_speaking: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    {
+        let tts_kill = tts_kill.clone();
+        let tts_speaking = tts_speaking.clone();
+        tokio::spawn(async move {
+            while let Some(text) = tts_rx.recv().await {
+                speaker::speak(&text, &tts_voice, &tts_kill, &tts_speaking).await;
+            }
+        });
+    }
 
     // Load Whisper model if available
     let model_path = Config::model_path(&config.model);
@@ -79,7 +103,16 @@ pub async fn run() -> anyhow::Result<()> {
         tts_tx,
         ptt_recorder: Arc::new(Mutex::new(recorder::Recorder::default())),
         transcriber,
+        recording: Arc::new(AtomicBool::new(false)),
+        tts_speaking,
+        just_processed: Arc::new(AtomicBool::new(false)),
+        tts_kill,
     };
+
+    // Send AppState to the main thread (for tray updates) before serving
+    if let Some(tx) = state_tx {
+        tx.send(state.clone()).ok();
+    }
 
     // Agent stale-pruning task
     {

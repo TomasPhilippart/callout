@@ -44,7 +44,8 @@ async fn transcribe_and_resolve(state: AppState) -> Result<impl IntoResponse, Ap
         rec.stop()
     };
 
-    if audio.len() < 1600 {
+    // 16 kHz mono: 1600 samples = 0.1 s minimum.
+    if audio.len() < 1_600 {
         tracing::warn!("PTT stop: audio too short");
         return Ok(Json(json!({"status": "too_short", "transcript": null})));
     }

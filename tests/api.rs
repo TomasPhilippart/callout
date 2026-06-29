@@ -5,8 +5,8 @@ use callout::{
     AppState, Config,
 };
 use serde_json::{json, Value};
-use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex, RwLock};
+use std::sync::{atomic::AtomicBool, Arc};
+use tokio::sync::{mpsc, Mutex, Notify, RwLock};
 use tower::ServiceExt;
 
 fn test_state() -> AppState {
@@ -19,6 +19,10 @@ fn test_state() -> AppState {
         tts_tx,
         ptt_recorder: Arc::new(Mutex::new(Recorder::default())),
         transcriber: None,
+        recording: Arc::new(AtomicBool::new(false)),
+        tts_speaking: Arc::new(AtomicBool::new(false)),
+        just_processed: Arc::new(AtomicBool::new(false)),
+        tts_kill: Arc::new(Notify::new()),
     }
 }
 

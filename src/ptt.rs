@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
 
 use global_hotkey::{
     hotkey::{Code, HotKey, Modifiers},
@@ -6,6 +6,9 @@ use global_hotkey::{
 };
 
 use crate::{recorder::Recorder, transcriber::Transcriber, AppState};
+
+/// 16 kHz mono: 0.1 s minimum to avoid transcribing accidental key taps.
+const MIN_SAMPLES: usize = 1_600;
 
 pub fn spawn(state: AppState, transcriber: Arc<Transcriber>) {
     std::thread::Builder::new()
@@ -42,49 +45,83 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
 
     let receiver = GlobalHotKeyEvent::receiver();
     let mut recorder = Recorder::default();
+    // Captured at PTT press time so transcription resolves the correct ask.
+    let mut pressed_for: Option<String> = None;
+
+    // Pre-open the CoreAudio stream so the first PTT press is instant.
+    if let Err(e) = recorder.warm() {
+        tracing::warn!(error = %e, "could not pre-warm audio stream — first press may be slow");
+    }
 
     loop {
-        if let Ok(event) = receiver.try_recv() {
-            if event.id != hotkey.id() {
-                continue;
-            }
-            match event.state {
-                HotKeyState::Pressed if !recorder.is_recording() => {
-                    tracing::info!("PTT pressed — listening");
-                    if let Err(e) = recorder.start() {
-                        tracing::error!(error = %e, "failed to start recorder");
-                    }
-                }
-                HotKeyState::Released if recorder.is_recording() => {
-                    let audio = recorder.stop();
-                    if audio.len() < 1600 {
-                        tracing::warn!("PTT release: too short, ignoring");
-                    } else {
-                        handle_audio(&state, &transcriber, audio);
-                    }
-                }
-                _ => {}
-            }
+        // Block until a hotkey event arrives (no polling sleep needed).
+        let Ok(event) = receiver.recv_timeout(std::time::Duration::from_secs(1)) else {
+            continue;
+        };
+        if event.id != hotkey.id() {
+            continue;
         }
-        std::thread::sleep(std::time::Duration::from_millis(5));
+        match event.state {
+            HotKeyState::Pressed => {
+                // If the key-up was lost (e.g. menu was open and swallowed it),
+                // the recorder may still think it's recording. Reset before starting fresh.
+                if recorder.is_recording() {
+                    recorder.stop();
+                    state.recording.store(false, Ordering::Relaxed);
+                    tracing::warn!("PTT: discarding stuck recording (key-up was lost)");
+                }
+                // Snapshot the pending ask NOW so transcription can't race
+                // against a new ask that arrives while Whisper is running.
+                pressed_for = state
+                    .router
+                    .blocking_lock()
+                    .pending_agent_ids()
+                    .next()
+                    .map(str::to_string);
+                // Interrupt any ongoing TTS before we start listening.
+                state.tts_kill.notify_one();
+                tracing::info!(target_ask = ?pressed_for, "PTT pressed — listening");
+                if let Err(e) = recorder.start() {
+                    tracing::error!(error = %e, "failed to start recorder");
+                    pressed_for = None;
+                } else {
+                    state.recording.store(true, Ordering::Relaxed);
+                    // "Recording started" earcon — confirms the keypress registered.
+                    #[cfg(target_os = "macos")]
+                    std::process::Command::new("afplay")
+                        .arg("/System/Library/Sounds/Tink.aiff")
+                        .spawn()
+                        .ok();
+                }
+            }
+            HotKeyState::Released if recorder.is_recording() => {
+                state.recording.store(false, Ordering::Relaxed);
+                let audio = recorder.stop();
+                let target = pressed_for.take();
+                if audio.len() < MIN_SAMPLES {
+                    tracing::warn!("PTT release: too short, ignoring");
+                } else {
+                    handle_audio(&state, &transcriber, audio, target);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
-fn handle_audio(state: &AppState, transcriber: &Transcriber, audio: Vec<f32>) {
-    let initial_prompt = {
-        let pending_id = state
-            .router
-            .blocking_lock()
-            .pending_agent_ids()
-            .next()
-            .map(str::to_string);
-        pending_id
-            .map(|id| {
-                let terms = state.agents.blocking_read().context_terms(&id);
-                state.glossary.whisper_prompt(&terms)
-            })
-            .unwrap_or_default()
-    };
+fn handle_audio(
+    state: &AppState,
+    transcriber: &Transcriber,
+    audio: Vec<f32>,
+    target_id: Option<String>,
+) {
+    let initial_prompt = target_id
+        .as_deref()
+        .map(|id| {
+            let terms = state.agents.blocking_read().context_terms(id);
+            state.glossary.whisper_prompt(&terms)
+        })
+        .unwrap_or_default();
 
     let transcript = match transcriber.transcribe(&audio, &initial_prompt) {
         Ok(t) if t.is_empty() => {
@@ -100,17 +137,25 @@ fn handle_audio(state: &AppState, transcriber: &Transcriber, audio: Vec<f32>) {
 
     tracing::info!(transcript = %transcript, "transcribed");
 
+    // Play earcon and pulse the processed badge for one tray-update cycle.
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("afplay")
+        .arg("/System/Library/Sounds/Glass.aiff")
+        .spawn()
+        .ok();
+    state.just_processed.store(true, Ordering::Relaxed);
+
     let corrected = state.glossary.apply_corrections(&transcript);
 
     let mut router = state.router.blocking_lock();
-    let agent_ids: Vec<String> = router.pending_agent_ids().map(str::to_string).collect();
-
-    if let Some(id) = agent_ids.first() {
-        if router.resolve(id, corrected.clone()) {
+    if let Some(id) = target_id {
+        if router.resolve(&id, corrected.clone()) {
             tracing::info!(agent_id = %id, answer = %corrected, "ask resolved via PTT");
+        } else {
+            tracing::info!(agent_id = %id, "PTT: ask already resolved or timed out");
         }
     } else {
-        tracing::info!(transcript = %corrected, "PTT: no pending ask to resolve");
+        tracing::info!(transcript = %corrected, "PTT: no pending ask at press time, discarding");
     }
 }
 
