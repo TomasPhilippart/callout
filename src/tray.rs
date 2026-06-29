@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::{cell::Cell, sync::atomic::Ordering};
 
 use tray_icon::{
@@ -21,6 +22,14 @@ pub struct Tray {
     ptt_label: String,
     /// Tracks last-applied icon state so set_icon is only called on transitions.
     last_icon: Cell<IconState>,
+    /// Cached menu content — set_menu is only called when this changes.
+    last_menu: RefCell<MenuSnapshot>,
+}
+
+#[derive(Default, PartialEq)]
+struct MenuSnapshot {
+    recording: bool,
+    rows: Vec<(String, AgentState, Option<String>)>,
 }
 
 pub fn build(ptt_key: &str) -> anyhow::Result<Tray> {
@@ -40,6 +49,7 @@ pub fn build(ptt_key: &str) -> anyhow::Result<Tray> {
         quit_id,
         ptt_label,
         last_icon: Cell::new(IconState::Idle),
+        last_menu: RefCell::new(MenuSnapshot::default()),
     })
 }
 
@@ -94,13 +104,14 @@ pub fn update_icon(tray: &Tray, state: &AppState) {
 }
 
 /// Rebuild the full menu with live agent list.
-/// Called every ~500 ms — takes brief locks on agents and router.
+/// Called every ~500 ms but only issues set_menu when content actually changed,
+/// so an open menu is never replaced mid-interaction.
 pub fn update_menu(tray: &Tray, state: &AppState) {
     let recording = state.recording.load(Ordering::Relaxed);
 
     let agents = state.agents.blocking_read();
     let router = state.router.blocking_lock();
-    let agent_rows: Vec<(String, AgentState, Option<String>)> = agents
+    let rows: Vec<(String, AgentState, Option<String>)> = agents
         .all()
         .iter()
         .map(|a| {
@@ -113,21 +124,26 @@ pub fn update_menu(tray: &Tray, state: &AppState) {
     drop(router);
     drop(agents);
 
+    let snapshot = MenuSnapshot { recording, rows };
+    if *tray.last_menu.borrow() == snapshot {
+        return; // nothing changed — leave the menu alone
+    }
+
     let quit = MenuItem::new("Quit callout", true, None);
     let menu = Menu::new();
 
-    if recording {
+    if snapshot.recording {
         menu.append(&MenuItem::new("● Recording…", false, None))
             .ok();
         menu.append(&PredefinedMenuItem::separator()).ok();
     }
 
-    if agent_rows.is_empty() {
+    if snapshot.rows.is_empty() {
         menu.append(&MenuItem::new("No agents connected", false, None))
             .ok();
     } else {
-        for (name, state, question) in &agent_rows {
-            let label = match (state, question) {
+        for (name, agent_state, question) in &snapshot.rows {
+            let label = match (agent_state, question) {
                 (AgentState::Waiting, Some(q)) => format!("{name}  ⏳ {q}"),
                 (AgentState::Waiting, None) => format!("{name}  ⏳"),
                 _ => name.clone(),
@@ -147,6 +163,7 @@ pub fn update_menu(tray: &Tray, state: &AppState) {
     menu.append(&quit).ok();
 
     tray.icon.set_menu(Some(Box::new(menu)));
+    *tray.last_menu.borrow_mut() = snapshot;
 }
 
 fn initial_menu(ptt_label: &str, quit: &MenuItem) -> Menu {
