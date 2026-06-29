@@ -43,33 +43,39 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
     let receiver = GlobalHotKeyEvent::receiver();
     let mut recorder = Recorder::default();
 
+    // Pre-open the CoreAudio stream so the first PTT press is instant.
+    if let Err(e) = recorder.warm() {
+        tracing::warn!(error = %e, "could not pre-warm audio stream — first press may be slow");
+    }
+
     loop {
-        if let Ok(event) = receiver.try_recv() {
-            if event.id != hotkey.id() {
-                continue;
-            }
-            match event.state {
-                HotKeyState::Pressed if !recorder.is_recording() => {
-                    tracing::info!("PTT pressed — listening");
-                    if let Err(e) = recorder.start() {
-                        tracing::error!(error = %e, "failed to start recorder");
-                    } else {
-                        state.recording.store(true, Ordering::Relaxed);
-                    }
-                }
-                HotKeyState::Released if recorder.is_recording() => {
-                    state.recording.store(false, Ordering::Relaxed);
-                    let audio = recorder.stop();
-                    if audio.len() < 1600 {
-                        tracing::warn!("PTT release: too short, ignoring");
-                    } else {
-                        handle_audio(&state, &transcriber, audio);
-                    }
-                }
-                _ => {}
-            }
+        // Block until a hotkey event arrives (no polling sleep needed).
+        let Ok(event) = receiver.recv_timeout(std::time::Duration::from_secs(1)) else {
+            continue;
+        };
+        if event.id != hotkey.id() {
+            continue;
         }
-        std::thread::sleep(std::time::Duration::from_millis(5));
+        match event.state {
+            HotKeyState::Pressed if !recorder.is_recording() => {
+                tracing::info!("PTT pressed — listening");
+                if let Err(e) = recorder.start() {
+                    tracing::error!(error = %e, "failed to start recorder");
+                } else {
+                    state.recording.store(true, Ordering::Relaxed);
+                }
+            }
+            HotKeyState::Released if recorder.is_recording() => {
+                state.recording.store(false, Ordering::Relaxed);
+                let audio = recorder.stop();
+                if audio.len() < 1600 {
+                    tracing::warn!("PTT release: too short, ignoring");
+                } else {
+                    handle_audio(&state, &transcriber, audio);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
