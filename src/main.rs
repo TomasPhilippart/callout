@@ -12,8 +12,8 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn run_serve() -> anyhow::Result<()> {
-    // global-hotkey and the tray icon both require the main thread to run the
-    // AppKit event loop.  Tokio runs on a named background thread instead.
+    // global-hotkey and the tray icon both require the AppKit event loop on
+    // the main thread.  Tokio runs on a named background thread instead.
     std::thread::Builder::new()
         .name("callout-tokio".into())
         .spawn(|| {
@@ -38,18 +38,17 @@ fn run_serve() -> anyhow::Result<()> {
 #[cfg(target_os = "macos")]
 fn run_macos_main() -> anyhow::Result<()> {
     use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy, NSEventMask};
+    use objc2_foundation::{NSDate, NSDefaultRunLoopMode};
 
-    // Give tokio a moment to register the global hotkey before we start
-    // pumping the event loop.
+    // Give tokio a moment to start and register the hotkey.
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     let mtm = MainThreadMarker::new().expect("must run on main thread");
     let app = NSApplication::sharedApplication(mtm);
-    // Accessory: no Dock icon, doesn't take focus.
+    // Accessory: no Dock icon, doesn't steal focus.
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
-    // finishLaunching sends applicationDidFinishLaunching and activates the
-    // app; required before creating an NSStatusItem (tray icon).
+    // Sends applicationDidFinishLaunching; required before creating NSStatusItem.
     app.finishLaunching();
 
     let ptt_key = callout::Config::load()
@@ -58,32 +57,26 @@ fn run_macos_main() -> anyhow::Result<()> {
 
     let tray = callout::tray::build(&ptt_key)?;
 
-    // Manual event loop: pump AppKit for 50 ms at a time, then poll channels.
-    // This lets both global-hotkey and tray-icon events be delivered while
-    // keeping the main thread available for Objective-C callbacks.
+    // NSEvent global monitors (used by global-hotkey) only fire when the
+    // AppKit event queue is drained via nextEventMatchingMask:…  CFRunLoopRun
+    // alone is not enough — we must call this method the way app.run() does.
     loop {
-        unsafe { pump_run_loop(0.05) };
+        let event = unsafe {
+            app.nextEventMatchingMask_untilDate_inMode_dequeue(
+                NSEventMask(u64::MAX),
+                Some(&NSDate::dateWithTimeIntervalSinceNow(0.05)),
+                NSDefaultRunLoopMode,
+                true,
+            )
+        };
+        if let Some(event) = event {
+            app.sendEvent(&event);
+        }
 
         if callout::tray::poll(&tray) {
             std::process::exit(0);
         }
     }
-}
-
-/// Run the CoreFoundation run loop for `seconds`, then return.
-/// Processes all pending AppKit / global-hotkey / NSMenu events.
-#[cfg(target_os = "macos")]
-unsafe fn pump_run_loop(seconds: f64) {
-    #[link(name = "CoreFoundation", kind = "framework")]
-    unsafe extern "C" {
-        static kCFRunLoopDefaultMode: *const core::ffi::c_void;
-        fn CFRunLoopRunInMode(
-            mode: *const core::ffi::c_void,
-            seconds: f64,
-            return_after_source_handled: u8,
-        ) -> i32;
-    }
-    CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, 0);
 }
 
 fn ptt_test() -> anyhow::Result<()> {
