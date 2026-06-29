@@ -12,6 +12,11 @@ pub async fn speak(text: &str, voice: &str, kill: &Arc<Notify>) {
 
     #[cfg(target_os = "macos")]
     {
+        // "Attention" earcon — plays before speech so the user knows to listen.
+        let _ = std::process::Command::new("afplay")
+            .arg("/System/Library/Sounds/Purr.aiff")
+            .status();
+
         let mut child = match tokio::process::Command::new("say")
             .arg("-v")
             .arg(voice)

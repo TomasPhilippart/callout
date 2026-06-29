@@ -65,6 +65,12 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
                     tracing::error!(error = %e, "failed to start recorder");
                 } else {
                     state.recording.store(true, Ordering::Relaxed);
+                    // "Recording started" earcon — confirms the keypress registered.
+                    #[cfg(target_os = "macos")]
+                    std::process::Command::new("afplay")
+                        .arg("/System/Library/Sounds/Tink.aiff")
+                        .spawn()
+                        .ok();
                 }
             }
             HotKeyState::Released if recorder.is_recording() => {
