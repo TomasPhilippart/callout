@@ -72,12 +72,17 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
 
 fn handle_audio(state: &AppState, transcriber: &Transcriber, audio: Vec<f32>) {
     let initial_prompt = {
-        let router = state.router.blocking_lock();
-        let agents = state.agents.blocking_read();
-        let pending_id = router.pending_agent_ids().next().map(str::to_string);
-        drop(router);
+        let pending_id = state
+            .router
+            .blocking_lock()
+            .pending_agent_ids()
+            .next()
+            .map(str::to_string);
         pending_id
-            .map(|id| state.glossary.whisper_prompt(&agents.context_terms(&id)))
+            .map(|id| {
+                let terms = state.agents.blocking_read().context_terms(&id);
+                state.glossary.whisper_prompt(&terms)
+            })
             .unwrap_or_default()
     };
 
@@ -151,6 +156,3 @@ fn parse_code(s: &str) -> anyhow::Result<Code> {
     })
 }
 
-pub fn vkey_pub(_name: &str) -> anyhow::Result<u16> {
-    anyhow::bail!("not applicable with global-hotkey backend")
-}
