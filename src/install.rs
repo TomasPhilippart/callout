@@ -1,0 +1,139 @@
+use std::path::PathBuf;
+
+const LABEL: &str = "com.callout";
+const PLIST_FILENAME: &str = "com.callout.plist";
+
+fn plist_path() -> anyhow::Result<PathBuf> {
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .map_err(|_| anyhow::anyhow!("HOME not set"))?;
+    Ok(home.join("Library/LaunchAgents").join(PLIST_FILENAME))
+}
+
+fn log_dir() -> anyhow::Result<PathBuf> {
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .map_err(|_| anyhow::anyhow!("HOME not set"))?;
+    Ok(home.join(".callout/logs"))
+}
+
+fn plist_contents(binary: &str, stdout: &str, stderr: &str) -> String {
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{binary}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{stdout}</string>
+    <key>StandardErrorPath</key>
+    <string>{stderr}</string>
+</dict>
+</plist>
+"#
+    )
+}
+
+/// Shell out to `id -u` rather than depending on libc, since this runs once per
+/// install/uninstall invocation — not a hot path.
+fn uid() -> String {
+    std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "501".to_string())
+}
+
+pub fn install() -> anyhow::Result<()> {
+    let binary = std::env::current_exe()
+        .map_err(|e| anyhow::anyhow!("cannot resolve binary path: {e}"))?;
+    let binary_str = binary
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("binary path is not valid UTF-8"))?;
+
+    // Warn if the binary looks like a debug/temp build — installing that path
+    // means the LaunchAgent breaks the moment the build artifact is cleaned.
+    if binary_str.contains("/target/debug/") || binary_str.contains("/var/folders/") {
+        eprintln!(
+            "warning: binary is at {binary_str}\n\
+             For a permanent install, run `cargo install --path .` first."
+        );
+    }
+
+    let plist = plist_path()?;
+    if plist.exists() {
+        anyhow::bail!(
+            "already installed ({}). Run `callout uninstall` first.",
+            plist.display()
+        );
+    }
+
+    let log_dir = log_dir()?;
+    std::fs::create_dir_all(&log_dir)?;
+    let stdout = log_dir.join("stdout.log");
+    let stderr = log_dir.join("stderr.log");
+
+    let contents = plist_contents(
+        binary_str,
+        stdout.to_str().unwrap(),
+        stderr.to_str().unwrap(),
+    );
+
+    std::fs::write(&plist, &contents)?;
+    println!("wrote {}", plist.display());
+
+    // Load immediately: launchctl bootstrap gui/<uid> <plist>
+    let status = std::process::Command::new("launchctl")
+        .args([
+            "bootstrap",
+            &format!("gui/{}", uid()),
+            plist.to_str().unwrap(),
+        ])
+        .status()?;
+
+    if !status.success() {
+        // Remove the plist so the user isn't left in a broken state
+        let _ = std::fs::remove_file(&plist);
+        anyhow::bail!("launchctl bootstrap failed (exit {})", status);
+    }
+
+    println!("callout will now start automatically at login.");
+    Ok(())
+}
+
+pub fn uninstall() -> anyhow::Result<()> {
+    let plist = plist_path()?;
+
+    if !plist.exists() {
+        anyhow::bail!("not installed (plist not found at {})", plist.display());
+    }
+
+    // Unload: launchctl bootout gui/<uid> <plist>
+    let status = std::process::Command::new("launchctl")
+        .args([
+            "bootout",
+            &format!("gui/{}", uid()),
+            plist.to_str().unwrap(),
+        ])
+        .status()?;
+
+    if !status.success() {
+        // Non-fatal: the service may not be running; still remove the plist
+        eprintln!("warning: launchctl bootout exited with status {status} (continuing)");
+    }
+
+    std::fs::remove_file(&plist)?;
+    println!("callout removed from login items.");
+    Ok(())
+}

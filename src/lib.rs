@@ -6,6 +6,8 @@ pub mod api;
 pub mod cli;
 pub mod config;
 pub mod glossary;
+#[cfg(target_os = "macos")]
+pub mod install;
 pub mod model;
 pub mod ptt;
 pub mod recorder;
