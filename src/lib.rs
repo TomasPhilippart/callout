@@ -37,6 +37,8 @@ pub struct AppState {
     pub just_processed: Arc<AtomicBool>,
     /// Signal the TTS task to interrupt the current `say` process (barge-in)
     pub tts_kill: Arc<Notify>,
+    /// Pre-selected agent for the next PTT press (set from tray, consumed by ptt.rs)
+    pub active_agent: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 pub async fn run() -> anyhow::Result<()> {
@@ -107,6 +109,7 @@ async fn run_inner(state_tx: Option<std::sync::mpsc::SyncSender<AppState>>) -> a
         tts_speaking,
         just_processed: Arc::new(AtomicBool::new(false)),
         tts_kill,
+        active_agent: Arc::new(std::sync::Mutex::new(None)),
     };
 
     // Send AppState to the main thread (for tray updates) before serving

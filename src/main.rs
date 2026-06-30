@@ -87,7 +87,7 @@ fn run_macos_main(state_rx: std::sync::mpsc::Receiver<callout::AppState>) -> any
             app.sendEvent(&event);
         }
 
-        if callout::tray::poll(&tray) {
+        if callout::tray::poll(&tray, app_state.as_ref()) {
             std::process::exit(0);
         }
 

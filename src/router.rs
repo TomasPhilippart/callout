@@ -65,6 +65,10 @@ impl AskRouter {
     pub fn pending_question(&self, agent_id: &str) -> Option<&str> {
         self.pending.get(agent_id).map(|a| a.question.as_str())
     }
+
+    pub fn pending_count(&self) -> usize {
+        self.pending.len()
+    }
 }
 
 fn match_choice<'a>(choices: &'a [Choice], transcript: &str) -> Option<&'a str> {
@@ -168,5 +172,35 @@ mod tests {
         router.insert("agent1".into(), ask);
         router.resolve("agent1", "done".into());
         assert!(!router.resolve("agent1", "again".into()));
+    }
+
+    #[test]
+    fn pending_count_reflects_inserts_and_resolves() {
+        let mut router = AskRouter::new();
+        assert_eq!(router.pending_count(), 0);
+
+        let (ask1, _rx1) = make_ask(vec![]);
+        let (ask2, _rx2) = make_ask(vec![]);
+        router.insert("a1".into(), ask1);
+        router.insert("a2".into(), ask2);
+        assert_eq!(router.pending_count(), 2);
+
+        router.resolve("a1", "done".into());
+        assert_eq!(router.pending_count(), 1);
+    }
+
+    #[test]
+    fn resolve_targets_specific_agent_leaves_other_pending() {
+        let mut router = AskRouter::new();
+        let (ask1, mut rx1) = make_ask(vec![]);
+        let (ask2, mut rx2) = make_ask(vec![]);
+        router.insert("a1".into(), ask1);
+        router.insert("a2".into(), ask2);
+
+        // Resolve only a1 — a2 must remain pending
+        assert!(router.resolve("a1", "yes".into()));
+        assert_eq!(router.pending_count(), 1);
+        assert!(rx1.try_recv().is_ok());
+        assert!(rx2.try_recv().is_err(), "a2 should still be pending");
     }
 }
