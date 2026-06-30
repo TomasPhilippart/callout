@@ -9,7 +9,9 @@ fn home_dir() -> anyhow::Result<PathBuf> {
 }
 
 fn plist_path() -> anyhow::Result<PathBuf> {
-    Ok(home_dir()?.join("Library/LaunchAgents").join(PLIST_FILENAME))
+    Ok(home_dir()?
+        .join("Library/LaunchAgents")
+        .join(PLIST_FILENAME))
 }
 
 fn log_dir() -> anyhow::Result<PathBuf> {
@@ -69,8 +71,8 @@ fn uid() -> anyhow::Result<String> {
 }
 
 pub fn install() -> anyhow::Result<()> {
-    let binary = std::env::current_exe()
-        .map_err(|e| anyhow::anyhow!("cannot resolve binary path: {e}"))?;
+    let binary =
+        std::env::current_exe().map_err(|e| anyhow::anyhow!("cannot resolve binary path: {e}"))?;
     let binary_str = binary
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("binary path is not valid UTF-8"))?;
