@@ -123,6 +123,10 @@ impl Config {
         Self::dir().join("models")
     }
 
+    pub fn logs_dir() -> PathBuf {
+        Self::dir().join("logs")
+    }
+
     pub fn model_path(size: &str) -> PathBuf {
         Self::models_dir().join(format!("ggml-{size}.bin"))
     }
