@@ -23,6 +23,7 @@ fn test_state() -> AppState {
         tts_speaking: Arc::new(AtomicBool::new(false)),
         just_processed: Arc::new(AtomicBool::new(false)),
         tts_kill: Arc::new(Notify::new()),
+        active_agent: Arc::new(std::sync::Mutex::new(None)),
     }
 }
 

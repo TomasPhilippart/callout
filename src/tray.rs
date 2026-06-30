@@ -31,7 +31,8 @@ pub struct Tray {
 #[derive(Default, PartialEq)]
 struct MenuSnapshot {
     recording: bool,
-    rows: Vec<(String, AgentState, Option<String>)>,
+    rows: Vec<(String, String, AgentState, Option<String>)>, // (agent_id, agent_name, state, question)
+    active_agent_id: Option<String>,
 }
 
 pub fn build(ptt_key: &str) -> anyhow::Result<Tray> {
@@ -59,10 +60,16 @@ pub fn build(ptt_key: &str) -> anyhow::Result<Tray> {
 }
 
 /// Poll menu events; returns true if the user chose Quit.
-pub fn poll(tray: &Tray) -> bool {
+pub fn poll(tray: &Tray, state: Option<&AppState>) -> bool {
     while let Ok(event) = MenuEvent::receiver().try_recv() {
         if event.id == tray.quit_id {
             return true;
+        }
+        if let Some(state) = state {
+            if let Some(agent_id) = event.id.0.strip_prefix("agent:") {
+                *state.active_agent.lock().unwrap() = Some(agent_id.to_string());
+                tracing::info!(agent_id = %agent_id, "tray: active agent pre-selected");
+            }
         }
     }
     false
@@ -116,18 +123,19 @@ pub fn update_menu(tray: &Tray, state: &AppState) {
 
     let agents = state.agents.blocking_read();
     let router = state.router.blocking_lock();
-    let rows: Vec<(String, AgentState, Option<String>)> = agents
+    let rows: Vec<(String, String, AgentState, Option<String>)> = agents
         .all()
         .iter()
         .map(|a| {
             let question = router.pending_question(&a.id).map(|q| truncate(q, 30));
-            (a.name.clone(), a.state.clone(), question)
+            (a.id.clone(), a.name.clone(), a.state.clone(), question)
         })
         .collect();
     drop(router);
     drop(agents);
 
-    let snapshot = MenuSnapshot { recording, rows };
+    let active_agent_id = state.active_agent.lock().unwrap().clone();
+    let snapshot = MenuSnapshot { recording, rows, active_agent_id };
     if *tray.last_menu.borrow() == snapshot {
         return; // nothing changed — leave the menu alone
     }
@@ -155,13 +163,27 @@ fn build_menu(ptt_label: &str, quit_id: &MenuId, snapshot: &MenuSnapshot) -> Men
         menu.append(&MenuItem::new("No agents connected", false, None))
             .ok();
     } else {
-        for (name, agent_state, question) in &snapshot.rows {
+        for (agent_id, name, agent_state, question) in &snapshot.rows {
+            let is_active = snapshot.active_agent_id.as_deref() == Some(agent_id.as_str());
+            let is_pending = matches!(agent_state, AgentState::Waiting) && question.is_some();
+
+            let prefix = if is_active { "→ " } else { "" };
             let label = match (agent_state, question) {
-                (AgentState::Waiting, Some(q)) => format!("{name}  ⏳ {q}"),
-                (AgentState::Waiting, None) => format!("{name}  ⏳"),
-                _ => name.clone(),
+                (AgentState::Waiting, Some(q)) => format!("{prefix}{name}  ⏳ {q}"),
+                (AgentState::Waiting, None)    => format!("{prefix}{name}  ⏳"),
+                _                              => format!("{prefix}{name}"),
             };
-            menu.append(&MenuItem::new(label, false, None)).ok();
+
+            if is_pending {
+                menu.append(&MenuItem::with_id(
+                    MenuId::new(format!("agent:{agent_id}")),
+                    label,
+                    true,
+                    None,
+                )).ok();
+            } else {
+                menu.append(&MenuItem::new(label, false, None)).ok();
+            }
         }
     }
 
