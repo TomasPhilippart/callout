@@ -14,8 +14,8 @@ fn plist_path() -> anyhow::Result<PathBuf> {
         .join(PLIST_FILENAME))
 }
 
-fn log_dir() -> anyhow::Result<PathBuf> {
-    Ok(home_dir()?.join(".callout/logs"))
+fn log_dir() -> PathBuf {
+    crate::Config::logs_dir()
 }
 
 fn xml_escape(s: &str) -> String {
@@ -26,9 +26,8 @@ fn xml_escape(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-fn plist_contents(binary: &str, stdout: &str, stderr: &str) -> String {
+fn plist_contents(binary: &str, stderr: &str) -> String {
     let binary = xml_escape(binary);
-    let stdout = xml_escape(stdout);
     let stderr = xml_escape(stderr);
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -48,8 +47,6 @@ fn plist_contents(binary: &str, stdout: &str, stderr: &str) -> String {
         <key>SuccessfulExit</key>
         <false/>
     </dict>
-    <key>StandardOutPath</key>
-    <string>{stdout}</string>
     <key>StandardErrorPath</key>
     <string>{stderr}</string>
 </dict>
@@ -97,17 +94,12 @@ pub fn install() -> anyhow::Result<()> {
         );
     }
 
-    let log_dir = log_dir()?;
+    let log_dir = log_dir();
     std::fs::create_dir_all(&log_dir)
         .with_context(|| format!("failed to create log directory {}", log_dir.display()))?;
-    let stdout = log_dir.join("stdout.log");
-    let stderr = log_dir.join("stderr.log");
+    let stderr = log_dir.join("launchd-stderr.log");
 
-    let contents = plist_contents(
-        binary_str,
-        stdout.to_str().unwrap(),
-        stderr.to_str().unwrap(),
-    );
+    let contents = plist_contents(binary_str, stderr.to_str().unwrap());
 
     std::fs::write(&plist, &contents)
         .with_context(|| format!("failed to write plist to {}", plist.display()))?;

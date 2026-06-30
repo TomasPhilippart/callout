@@ -29,6 +29,12 @@ pub enum Command {
     /// Remove callout from login items (macOS only)
     #[cfg(target_os = "macos")]
     Uninstall,
+    /// Print the most recent log lines
+    Logs {
+        /// Number of lines to print
+        #[arg(short = 'n', long, default_value = "100")]
+        lines: usize,
+    },
 }
 
 #[derive(Subcommand)]

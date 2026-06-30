@@ -8,6 +8,7 @@ pub mod config;
 pub mod glossary;
 #[cfg(target_os = "macos")]
 pub mod install;
+pub mod logs;
 pub mod model;
 pub mod ptt;
 pub mod recorder;
@@ -54,12 +55,46 @@ pub async fn run_with(tx: std::sync::mpsc::SyncSender<AppState>) -> anyhow::Resu
 }
 
 async fn run_inner(state_tx: Option<std::sync::mpsc::SyncSender<AppState>>) -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "callout=info".into()),
-        )
-        .init();
+    use tracing_subscriber::prelude::*;
+
+    let logs_dir = Config::logs_dir();
+    if let Err(e) = std::fs::create_dir_all(&logs_dir) {
+        eprintln!("warning: failed to create log directory: {e}");
+    }
+
+    // Builder::build() returns a Result (unlike rolling::daily(), which panics
+    // internally on failure) so a bad log directory degrades to stdout-only
+    // logging instead of crashing the daemon at startup.
+    let file_appender = tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("callout.log")
+        .build(&logs_dir)
+        .inspect_err(|e| {
+            eprintln!(
+                "warning: failed to initialize file logging: {e} — continuing with stdout only"
+            );
+        })
+        .ok();
+
+    let (file_layer, _log_guard) = match file_appender {
+        Some(appender) => {
+            let (writer, guard) = tracing_appender::non_blocking(appender);
+            let layer = tracing_subscriber::fmt::layer()
+                .with_writer(writer)
+                .with_ansi(false);
+            (Some(layer), Some(guard))
+        }
+        None => (None, None),
+    };
+
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "callout=info".into());
+
+    let _ = tracing_subscriber::registry()
+        .with(env_filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(file_layer)
+        .try_init();
 
     let config = Config::load()?;
     let glossary = glossary::Glossary::load();
