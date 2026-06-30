@@ -44,7 +44,10 @@ fn plist_contents(binary: &str, stdout: &str, stderr: &str) -> String {
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
     <key>StandardOutPath</key>
     <string>{stdout}</string>
     <key>StandardErrorPath</key>
