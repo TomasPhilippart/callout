@@ -8,7 +8,6 @@ pub mod config;
 pub mod glossary;
 #[cfg(target_os = "macos")]
 pub mod install;
-#[cfg(target_os = "macos")]
 pub mod logs;
 pub mod model;
 pub mod ptt;

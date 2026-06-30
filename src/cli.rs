@@ -30,7 +30,6 @@ pub enum Command {
     #[cfg(target_os = "macos")]
     Uninstall,
     /// Print the most recent log lines
-    #[cfg(target_os = "macos")]
     Logs {
         /// Number of lines to print
         #[arg(short = 'n', long, default_value = "100")]
