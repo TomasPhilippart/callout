@@ -47,6 +47,7 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
     let mut recorder = Recorder::default();
     // Captured at PTT press time so transcription resolves the correct ask.
     let mut pressed_for: Option<String> = None;
+    let mut disambiguation_candidates: Vec<(String, String)> = Vec::new(); // (agent_id, agent_name)
 
     // Pre-open the CoreAudio stream so the first PTT press is instant.
     if let Err(e) = recorder.warm() {
@@ -72,12 +73,27 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
                 }
                 // Snapshot the pending ask NOW so transcription can't race
                 // against a new ask that arrives while Whisper is running.
-                pressed_for = state
-                    .router
-                    .blocking_lock()
-                    .pending_agent_ids()
-                    .next()
-                    .map(str::to_string);
+                let maybe_active = state.active_agent.lock().unwrap().clone();
+                let router = state.router.blocking_lock();
+                let agents = state.agents.blocking_read();
+                let validated_active = maybe_active.filter(|id| router.pending_question(id).is_some());
+
+                if let Some(id) = validated_active {
+                    pressed_for = Some(id);
+                    disambiguation_candidates = Vec::new();
+                } else {
+                    // Stale or unset — clear active_agent and collect all pending for voice disambiguation
+                    drop(router);
+                    drop(agents);
+                    *state.active_agent.lock().unwrap() = None;
+                    let router = state.router.blocking_lock();
+                    let agents = state.agents.blocking_read();
+                    pressed_for = None;
+                    disambiguation_candidates = router
+                        .pending_agent_ids()
+                        .map(|id| (id.to_string(), agents.name(id)))
+                        .collect();
+                }
                 // Interrupt any ongoing TTS before we start listening.
                 state.tts_kill.notify_one();
                 tracing::info!(target_ask = ?pressed_for, "PTT pressed — listening");
@@ -98,10 +114,11 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
                 state.recording.store(false, Ordering::Relaxed);
                 let audio = recorder.stop();
                 let target = pressed_for.take();
+                let candidates = std::mem::take(&mut disambiguation_candidates);
                 if audio.len() < MIN_SAMPLES {
                     tracing::warn!("PTT release: too short, ignoring");
                 } else {
-                    handle_audio(&state, &transcriber, audio, target);
+                    handle_audio(&state, &transcriber, audio, target, candidates);
                 }
             }
             _ => {}
@@ -114,14 +131,17 @@ fn handle_audio(
     transcriber: &Transcriber,
     audio: Vec<f32>,
     target_id: Option<String>,
+    candidates: Vec<(String, String)>,
 ) {
-    let initial_prompt = target_id
-        .as_deref()
-        .map(|id| {
-            let terms = state.agents.blocking_read().context_terms(id);
-            state.glossary.whisper_prompt(&terms)
-        })
-        .unwrap_or_default();
+    let initial_prompt = if let Some(id) = target_id.as_deref() {
+        let terms = state.agents.blocking_read().context_terms(id);
+        state.glossary.whisper_prompt(&terms)
+    } else if !candidates.is_empty() {
+        // Prime Whisper with agent names so they transcribe accurately
+        candidates.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>().join(", ")
+    } else {
+        String::new()
+    };
 
     let transcript = match transcriber.transcribe(&audio, &initial_prompt) {
         Ok(t) if t.is_empty() => {
@@ -147,16 +167,80 @@ fn handle_audio(
 
     let corrected = state.glossary.apply_corrections(&transcript);
 
-    let mut router = state.router.blocking_lock();
-    if let Some(id) = target_id {
-        if router.resolve(&id, corrected.clone()) {
-            tracing::info!(agent_id = %id, answer = %corrected, "ask resolved via PTT");
-        } else {
-            tracing::info!(agent_id = %id, "PTT: ask already resolved or timed out");
+    let (final_target, answer) = if let Some(id) = target_id {
+        // Definite target: tray pre-selected or single pending agent
+        (id, corrected)
+    } else if candidates.len() == 1 {
+        (candidates.into_iter().next().unwrap().0, corrected)
+    } else if !candidates.is_empty() {
+        // Voice disambiguation: user says "AgentName answer text"
+        match extract_agent_prefix(&corrected, &candidates) {
+            Some((id, ans)) if !ans.is_empty() => (id, ans),
+            Some((id, _)) => {
+                // User said just the agent name — confirm and wait for next press
+                let name = candidates.iter().find(|(cid, _)| *cid == id)
+                    .map(|(_, n)| n.as_str()).unwrap_or("agent");
+                *state.active_agent.lock().unwrap() = Some(id);
+                let _ = state.tts_tx.blocking_send(
+                    format!("Answering {}. Hold to reply.", name)
+                );
+                return;
+            }
+            None => {
+                let names: Vec<&str> = candidates.iter().map(|(_, n)| n.as_str()).collect();
+                let _ = state.tts_tx.blocking_send(
+                    format!("Say the agent name first: {}", names.join(" or "))
+                );
+                return;
+            }
         }
     } else {
         tracing::info!(transcript = %corrected, "PTT: no pending ask at press time, discarding");
+        return;
+    };
+
+    let mut router = state.router.blocking_lock();
+    if router.resolve(&final_target, answer.clone()) {
+        drop(router);
+        *state.active_agent.lock().unwrap() = None;
+        tracing::info!(agent_id = %final_target, answer = %answer, "ask resolved via PTT");
+    } else {
+        tracing::info!(agent_id = %final_target, "PTT: ask already resolved or timed out");
     }
+}
+
+/// Extract an agent name prefix from a transcript for voice disambiguation.
+/// Tries exact prefix match (longest name first), then fuzzy Jaro-Winkler.
+/// Returns `(agent_id, remainder_answer)` on match.
+fn extract_agent_prefix(transcript: &str, candidates: &[(String, String)]) -> Option<(String, String)> {
+    let t = transcript.trim().to_lowercase();
+
+    // Longest name first to avoid "cursor" shadowing "cursor agent"
+    let mut sorted: Vec<&(String, String)> = candidates.iter().collect();
+    sorted.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+
+    // Exact prefix match
+    for (id, name) in &sorted {
+        let n = name.to_lowercase();
+        if let Some(rest) = t.strip_prefix(n.as_str()) {
+            let answer = rest.trim_start_matches(|c: char| c == ':' || c == ',' || c.is_whitespace());
+            return Some((id.clone(), answer.to_string()));
+        }
+    }
+
+    // Fuzzy: compare word-aligned prefix of transcript against agent name
+    for (id, name) in &sorted {
+        let n = name.to_lowercase();
+        let word_count = n.split_whitespace().count();
+        let t_prefix: String = t.split_whitespace().take(word_count).collect::<Vec<_>>().join(" ");
+        if strsim::jaro_winkler(&t_prefix, &n) > 0.85 {
+            let answer: String = t.split_whitespace().skip(word_count).collect::<Vec<_>>().join(" ");
+            let answer = answer.trim_start_matches(|c: char| c == ':' || c == ',').trim().to_string();
+            return Some((id.clone(), answer));
+        }
+    }
+
+    None
 }
 
 fn parse_hotkey(s: &str) -> anyhow::Result<HotKey> {
