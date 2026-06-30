@@ -1,23 +1,33 @@
+use anyhow::Context;
 use std::path::PathBuf;
 
 const LABEL: &str = "com.callout";
 const PLIST_FILENAME: &str = "com.callout.plist";
 
+fn home_dir() -> anyhow::Result<PathBuf> {
+    dirs::home_dir().ok_or_else(|| anyhow::anyhow!("could not determine home directory"))
+}
+
 fn plist_path() -> anyhow::Result<PathBuf> {
-    let home = std::env::var("HOME")
-        .map(PathBuf::from)
-        .map_err(|_| anyhow::anyhow!("HOME not set"))?;
-    Ok(home.join("Library/LaunchAgents").join(PLIST_FILENAME))
+    Ok(home_dir()?.join("Library/LaunchAgents").join(PLIST_FILENAME))
 }
 
 fn log_dir() -> anyhow::Result<PathBuf> {
-    let home = std::env::var("HOME")
-        .map(PathBuf::from)
-        .map_err(|_| anyhow::anyhow!("HOME not set"))?;
-    Ok(home.join(".callout/logs"))
+    Ok(home_dir()?.join(".callout/logs"))
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 fn plist_contents(binary: &str, stdout: &str, stderr: &str) -> String {
+    let binary = xml_escape(binary);
+    let stdout = xml_escape(stdout);
+    let stderr = xml_escape(stderr);
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -45,14 +55,17 @@ fn plist_contents(binary: &str, stdout: &str, stderr: &str) -> String {
 
 /// Shell out to `id -u` rather than depending on libc, since this runs once per
 /// install/uninstall invocation — not a hot path.
-fn uid() -> String {
-    std::process::Command::new("id")
+fn uid() -> anyhow::Result<String> {
+    let output = std::process::Command::new("id")
         .arg("-u")
         .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map_err(|e| anyhow::anyhow!("failed to run `id -u`: {e}"))?;
+    if !output.status.success() {
+        anyhow::bail!("`id -u` exited with status {}", output.status);
+    }
+    String::from_utf8(output.stdout)
         .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "501".to_string())
+        .map_err(|e| anyhow::anyhow!("`id -u` output was not valid UTF-8: {e}"))
 }
 
 pub fn install() -> anyhow::Result<()> {
@@ -80,7 +93,8 @@ pub fn install() -> anyhow::Result<()> {
     }
 
     let log_dir = log_dir()?;
-    std::fs::create_dir_all(&log_dir)?;
+    std::fs::create_dir_all(&log_dir)
+        .with_context(|| format!("failed to create log directory {}", log_dir.display()))?;
     let stdout = log_dir.join("stdout.log");
     let stderr = log_dir.join("stderr.log");
 
@@ -90,16 +104,14 @@ pub fn install() -> anyhow::Result<()> {
         stderr.to_str().unwrap(),
     );
 
-    std::fs::write(&plist, &contents)?;
+    std::fs::write(&plist, &contents)
+        .with_context(|| format!("failed to write plist to {}", plist.display()))?;
     println!("wrote {}", plist.display());
 
     // Load immediately: launchctl bootstrap gui/<uid> <plist>
+    let uid = uid()?;
     let status = std::process::Command::new("launchctl")
-        .args([
-            "bootstrap",
-            &format!("gui/{}", uid()),
-            plist.to_str().unwrap(),
-        ])
+        .args(["bootstrap", &format!("gui/{uid}"), plist.to_str().unwrap()])
         .status()?;
 
     if !status.success() {
@@ -120,12 +132,9 @@ pub fn uninstall() -> anyhow::Result<()> {
     }
 
     // Unload: launchctl bootout gui/<uid> <plist>
+    let uid = uid()?;
     let status = std::process::Command::new("launchctl")
-        .args([
-            "bootout",
-            &format!("gui/{}", uid()),
-            plist.to_str().unwrap(),
-        ])
+        .args(["bootout", &format!("gui/{uid}"), plist.to_str().unwrap()])
         .status()?;
 
     if !status.success() {
@@ -133,7 +142,8 @@ pub fn uninstall() -> anyhow::Result<()> {
         eprintln!("warning: launchctl bootout exited with status {status} (continuing)");
     }
 
-    std::fs::remove_file(&plist)?;
+    std::fs::remove_file(&plist)
+        .with_context(|| format!("failed to remove plist at {}", plist.display()))?;
     println!("callout removed from login items.");
     Ok(())
 }
