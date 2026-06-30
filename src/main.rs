@@ -12,6 +12,8 @@ fn main() -> anyhow::Result<()> {
         Some(Command::Install) => callout::install::install(),
         #[cfg(target_os = "macos")]
         Some(Command::Uninstall) => callout::install::uninstall(),
+        #[cfg(target_os = "macos")]
+        Some(Command::Logs { lines }) => callout::logs::print_recent(lines),
     }
 }
 
