@@ -26,7 +26,7 @@ tracing-appender = "0.2"
 dirs         = "5"
 strsim       = "0.11"
 clap         = { version = "4",    features = ["derive"] }
-ureq         = { version = "2",    features = ["json"] }
+ureq         = { version = "2",    default-features = false, features = ["json"] }
 
 # Audio pipeline (Phase 2)
 cpal          = "0.15"
