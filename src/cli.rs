@@ -23,6 +23,12 @@ pub enum Command {
     },
     /// Debug: show configured PTT hotkey
     PttTest,
+    /// Register callout as a login item (macOS only)
+    #[cfg(target_os = "macos")]
+    Install,
+    /// Remove callout from login items (macOS only)
+    #[cfg(target_os = "macos")]
+    Uninstall,
 }
 
 #[derive(Subcommand)]
