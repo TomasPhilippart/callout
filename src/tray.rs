@@ -135,7 +135,11 @@ pub fn update_menu(tray: &Tray, state: &AppState) {
     drop(agents);
 
     let active_agent_id = state.active_agent.lock().unwrap().clone();
-    let snapshot = MenuSnapshot { recording, rows, active_agent_id };
+    let snapshot = MenuSnapshot {
+        recording,
+        rows,
+        active_agent_id,
+    };
     if *tray.last_menu.borrow() == snapshot {
         return; // nothing changed — leave the menu alone
     }
@@ -170,8 +174,8 @@ fn build_menu(ptt_label: &str, quit_id: &MenuId, snapshot: &MenuSnapshot) -> Men
             let prefix = if is_active { "→ " } else { "" };
             let label = match (agent_state, question) {
                 (AgentState::Waiting, Some(q)) => format!("{prefix}{name}  ⏳ {q}"),
-                (AgentState::Waiting, None)    => format!("{prefix}{name}  ⏳"),
-                _                              => format!("{prefix}{name}"),
+                (AgentState::Waiting, None) => format!("{prefix}{name}  ⏳"),
+                _ => format!("{prefix}{name}"),
             };
 
             if is_pending {
@@ -180,7 +184,8 @@ fn build_menu(ptt_label: &str, quit_id: &MenuId, snapshot: &MenuSnapshot) -> Men
                     label,
                     true,
                     None,
-                )).ok();
+                ))
+                .ok();
             } else {
                 menu.append(&MenuItem::new(label, false, None)).ok();
             }

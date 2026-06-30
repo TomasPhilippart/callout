@@ -76,7 +76,8 @@ fn run_loop(state: AppState, transcriber: Arc<Transcriber>) {
                 let maybe_active = state.active_agent.lock().unwrap().clone();
                 let router = state.router.blocking_lock();
                 let agents = state.agents.blocking_read();
-                let validated_active = maybe_active.filter(|id| router.pending_question(id).is_some());
+                let validated_active =
+                    maybe_active.filter(|id| router.pending_question(id).is_some());
 
                 if let Some(id) = validated_active {
                     pressed_for = Some(id);
@@ -138,7 +139,11 @@ fn handle_audio(
         state.glossary.whisper_prompt(&terms)
     } else if !candidates.is_empty() {
         // Prime Whisper with agent names so they transcribe accurately
-        candidates.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>().join(", ")
+        candidates
+            .iter()
+            .map(|(_, n)| n.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
     } else {
         String::new()
     };
@@ -178,19 +183,22 @@ fn handle_audio(
             Some((id, ans)) if !ans.is_empty() => (id, ans),
             Some((id, _)) => {
                 // User said just the agent name — confirm and wait for next press
-                let name = candidates.iter().find(|(cid, _)| *cid == id)
-                    .map(|(_, n)| n.as_str()).unwrap_or("agent");
+                let name = candidates
+                    .iter()
+                    .find(|(cid, _)| *cid == id)
+                    .map(|(_, n)| n.as_str())
+                    .unwrap_or("agent");
                 *state.active_agent.lock().unwrap() = Some(id);
-                let _ = state.tts_tx.blocking_send(
-                    format!("Answering {}. Hold to reply.", name)
-                );
+                let _ = state
+                    .tts_tx
+                    .blocking_send(format!("Answering {}. Hold to reply.", name));
                 return;
             }
             None => {
                 let names: Vec<&str> = candidates.iter().map(|(_, n)| n.as_str()).collect();
-                let _ = state.tts_tx.blocking_send(
-                    format!("Say the agent name first: {}", names.join(" or "))
-                );
+                let _ = state
+                    .tts_tx
+                    .blocking_send(format!("Say the agent name first: {}", names.join(" or ")));
                 return;
             }
         }
@@ -212,7 +220,10 @@ fn handle_audio(
 /// Extract an agent name prefix from a transcript for voice disambiguation.
 /// Tries exact prefix match (longest name first), then fuzzy Jaro-Winkler.
 /// Returns `(agent_id, remainder_answer)` on match.
-fn extract_agent_prefix(transcript: &str, candidates: &[(String, String)]) -> Option<(String, String)> {
+fn extract_agent_prefix(
+    transcript: &str,
+    candidates: &[(String, String)],
+) -> Option<(String, String)> {
     let t = transcript.trim().to_lowercase();
 
     // Longest name first to avoid "cursor" shadowing "cursor agent"
@@ -223,7 +234,8 @@ fn extract_agent_prefix(transcript: &str, candidates: &[(String, String)]) -> Op
     for (id, name) in &sorted {
         let n = name.to_lowercase();
         if let Some(rest) = t.strip_prefix(n.as_str()) {
-            let answer = rest.trim_start_matches(|c: char| c == ':' || c == ',' || c.is_whitespace());
+            let answer =
+                rest.trim_start_matches(|c: char| c == ':' || c == ',' || c.is_whitespace());
             return Some((id.clone(), answer.to_string()));
         }
     }
@@ -232,10 +244,18 @@ fn extract_agent_prefix(transcript: &str, candidates: &[(String, String)]) -> Op
     for (id, name) in &sorted {
         let n = name.to_lowercase();
         let word_count = n.split_whitespace().count();
-        let t_prefix: String = t.split_whitespace().take(word_count).collect::<Vec<_>>().join(" ");
+        let t_prefix: String = t
+            .split_whitespace()
+            .take(word_count)
+            .collect::<Vec<_>>()
+            .join(" ");
         if strsim::jaro_winkler(&t_prefix, &n) > 0.85 {
-            let answer: String = t.split_whitespace().skip(word_count).collect::<Vec<_>>().join(" ");
-            let answer = answer.trim_start_matches(|c: char| c == ':' || c == ',').trim().to_string();
+            let answer: String = t
+                .split_whitespace()
+                .skip(word_count)
+                .collect::<Vec<_>>()
+                .join(" ");
+            let answer = answer.trim_start_matches([':', ',']).trim().to_string();
             return Some((id.clone(), answer));
         }
     }
