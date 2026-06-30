@@ -8,6 +8,10 @@ fn main() -> anyhow::Result<()> {
         Some(Command::Voices { cmd }) => callout::voices::run(cmd),
         Some(Command::Model { cmd }) => callout::model::run(cmd),
         Some(Command::PttTest) => ptt_test(),
+        #[cfg(target_os = "macos")]
+        Some(Command::Install) => callout::install::install(),
+        #[cfg(target_os = "macos")]
+        Some(Command::Uninstall) => callout::install::uninstall(),
     }
 }
 
