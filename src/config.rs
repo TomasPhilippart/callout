@@ -127,6 +127,10 @@ impl Config {
         Self::dir().join("logs")
     }
 
+    pub fn sessions_path() -> PathBuf {
+        Self::dir().join("sessions.json")
+    }
+
     pub fn model_path(size: &str) -> PathBuf {
         Self::models_dir().join(format!("ggml-{size}.bin"))
     }
