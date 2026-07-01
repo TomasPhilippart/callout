@@ -217,7 +217,7 @@ pub fn pretooluse_question(
 }
 
 /// PreToolUse `hookSpecificOutput` contract (confirmed against Claude Code
-/// docs, see docs/plans/2026-06-30-voice-permission-hooks-design.md Task 0):
+/// docs, see docs/plans/2026-06-30-voice-permission-hooks-implementation.md Task 0):
 /// ```json
 /// {"hookSpecificOutput": {"hookEventName": "PreToolUse",
 ///   "permissionDecision": "allow"|"deny"|"ask", "permissionDecisionReason": "..."}}
