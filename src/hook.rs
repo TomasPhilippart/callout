@@ -188,6 +188,14 @@ pub fn status_agent_ids(base_url: &str) -> Result<Vec<String>> {
     Ok(resp.agents.into_iter().map(|a| a.id).collect())
 }
 
+/// Builds the spoken confirmation question for a PreToolUse hook invocation.
+///
+/// Only the `command` field of `tool_input` is special-cased (Bash's shell
+/// command string) so it reads naturally when spoken. Every other tool falls
+/// back to reading the raw `tool_input` JSON verbatim, which is serviceable
+/// for today's Bash-only allowlist but should be tightened with per-tool
+/// formatting before this is widened to other tools (e.g. Edit/Write/WebFetch)
+/// whose JSON doesn't read naturally aloud.
 pub fn pretooluse_question(
     agent_name: &str,
     tool_name: &str,
@@ -208,9 +216,21 @@ pub fn pretooluse_question(
     )
 }
 
+/// PreToolUse `hookSpecificOutput` contract (confirmed against Claude Code
+/// docs, see docs/plans/2026-06-30-voice-permission-hooks-design.md Task 0):
+/// ```json
+/// {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+///   "permissionDecision": "allow"|"deny"|"ask", "permissionDecisionReason": "..."}}
+/// ```
+/// Omitting stdout entirely (exit 0) falls through to Claude Code's
+/// interactive prompt — that fallback lives in the CLI wiring, not here.
+///
 /// Maps a PTT answer to Claude Code's PreToolUse decision JSON.
 /// `None` (timeout, or no answer) fails safe to deny.
 pub fn decision_json(answer: Option<&str>) -> serde_json::Value {
+    // "yes" is currently unreachable from the only caller: the router always
+    // resolves an /ask response to the choice *key* ("y"/"n"), never the
+    // label. Kept as intentional lenience for future callers, not dead code.
     let allow = matches!(
         answer.map(str::to_lowercase).as_deref(),
         Some("y") | Some("yes")
