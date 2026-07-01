@@ -49,7 +49,17 @@ pub fn save_registry(path: &Path, registry: &SessionRegistry) -> Result<()> {
 }
 
 fn http_error(context: &str, e: ureq::Error) -> anyhow::Error {
-    anyhow::anyhow!("{context}: {e}")
+    match e {
+        ureq::Error::Status(status, response) => {
+            let body = response
+                .into_string()
+                .unwrap_or_else(|_| "<failed to read response body>".to_string());
+            anyhow::anyhow!("{context}: HTTP {status}: {body}")
+        }
+        transport_err @ ureq::Error::Transport(_) => {
+            anyhow::anyhow!("{context}: {transport_err}")
+        }
+    }
 }
 
 pub fn register_agent(base_url: &str, name: &str) -> Result<String> {
@@ -81,6 +91,9 @@ pub fn notify(base_url: &str, agent_id: &str, message: &str) -> Result<()> {
     Ok(())
 }
 
+/// Deliberately only captures `answer`/`timed_out` from the server's
+/// `AskResponseBody` — `answers`/`raw` are not needed by callers of this
+/// client and are intentionally dropped, not overlooked.
 #[derive(Deserialize)]
 pub struct AskResult {
     pub answer: Option<String>,

@@ -24,20 +24,23 @@ fn test_state() -> AppState {
 }
 
 /// Boots a real callout API server on an ephemeral localhost port.
-/// Returns the base URL (e.g. "http://127.0.0.1:54321").
-async fn spawn_server() -> String {
+/// Returns the base URL (e.g. "http://127.0.0.1:54321") along with the
+/// `AppState` backing it, so tests can reach into shared state (e.g. to
+/// resolve a pending `/ask` from the test body).
+async fn spawn_server() -> (String, AppState) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let app = api::build_app(test_state());
+    let state = test_state();
+    let app = api::build_app(state.clone());
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
-    format!("http://{addr}")
+    (format!("http://{addr}"), state)
 }
 
 #[tokio::test]
 async fn register_agent_returns_id() {
-    let base = spawn_server().await;
+    let (base, _state) = spawn_server().await;
     let id =
         tokio::task::spawn_blocking(move || callout::hook::register_agent(&base, "Test Agent"))
             .await
@@ -48,7 +51,7 @@ async fn register_agent_returns_id() {
 
 #[tokio::test]
 async fn notify_succeeds() {
-    let base = spawn_server().await;
+    let (base, _state) = spawn_server().await;
     let id = tokio::task::spawn_blocking({
         let base = base.clone();
         move || callout::hook::register_agent(&base, "Test Agent")
@@ -65,7 +68,7 @@ async fn notify_succeeds() {
 
 #[tokio::test]
 async fn status_lists_registered_agent() {
-    let base = spawn_server().await;
+    let (base, _state) = spawn_server().await;
     let id = tokio::task::spawn_blocking({
         let base = base.clone();
         move || callout::hook::register_agent(&base, "Test Agent")
@@ -79,4 +82,48 @@ async fn status_lists_registered_agent() {
         .unwrap()
         .unwrap();
     assert!(ids.contains(&id));
+}
+
+#[tokio::test]
+async fn ask_returns_resolved_answer() {
+    let (base, state) = spawn_server().await;
+    let id = tokio::task::spawn_blocking({
+        let base = base.clone();
+        move || callout::hook::register_agent(&base, "Test Agent")
+    })
+    .await
+    .unwrap()
+    .unwrap();
+
+    let ask_handle = tokio::task::spawn_blocking({
+        let base = base.clone();
+        let id = id.clone();
+        move || {
+            callout::hook::ask(
+                &base,
+                &id,
+                "Proceed?",
+                &[
+                    ("yes".to_string(), "Yes".to_string()),
+                    ("no".to_string(), "No".to_string()),
+                ],
+                5,
+                None,
+            )
+        }
+    });
+
+    // Wait until the blocking `ask()` call has registered its pending ask
+    // with the router, then resolve it as if the user answered by voice.
+    loop {
+        if state.router.lock().await.pending_count() > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(state.router.lock().await.resolve(&id, "yes".to_string()));
+
+    let result = ask_handle.await.unwrap().unwrap();
+    assert_eq!(result.answer.as_deref(), Some("yes"));
+    assert!(!result.timed_out);
 }
