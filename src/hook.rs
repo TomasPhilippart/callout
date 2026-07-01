@@ -139,6 +139,7 @@ pub fn ask(
     Ok(result)
 }
 
+// Not safe for concurrent callers on the same session_id — see SessionRegistry's concurrency note.
 pub fn resolve_agent_id(
     base_url: &str,
     registry_path: &Path,
@@ -152,7 +153,11 @@ pub fn resolve_agent_id(
         if known_ids.contains(&entry.agent_id) {
             return Ok(entry.agent_id.clone());
         }
-        tracing::info!(session_id, "cached agent_id is stale — re-registering");
+        tracing::info!(
+            session_id,
+            stale_agent_id = %entry.agent_id,
+            "cached agent_id is stale — re-registering"
+        );
     }
 
     let agent_id = register_agent(base_url, name_hint)?;

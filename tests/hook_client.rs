@@ -186,3 +186,34 @@ async fn resolve_agent_id_reregisters_after_daemon_restart() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn resolve_agent_id_daemon_unreachable_returns_err_promptly() {
+    // Bind an ephemeral port and immediately drop the listener so the port
+    // is guaranteed to have nothing listening on it, giving us a reliable
+    // "connection refused" instead of relying on a hardcoded port number.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    let base = format!("http://{addr}");
+
+    let dir = std::env::temp_dir().join(format!("callout-test-unreachable-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("sessions.json");
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || {
+            callout::hook::resolve_agent_id(&base, &path, "sess-c", "Test Agent")
+        }),
+    )
+    .await
+    .expect("resolve_agent_id must not hang when the daemon is unreachable")
+    .unwrap();
+
+    assert!(
+        result.is_err(),
+        "resolve_agent_id must return Err when the daemon is unreachable"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
