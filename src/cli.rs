@@ -35,6 +35,32 @@ pub enum Command {
         #[arg(short = 'n', long, default_value = "100")]
         lines: usize,
     },
+    /// Send a one-off spoken notification
+    Notify {
+        message: String,
+        /// Explicit agent_id to attach to (default: reuses a session keyed by
+        /// $CLAUDE_SESSION_ID, or "manual" if unset)
+        #[arg(long)]
+        agent_id: Option<String>,
+    },
+    /// Ask a yes/no or multiple-choice question and wait for a PTT answer
+    Ask {
+        question: String,
+        /// Choice in "key:label" form, repeatable
+        #[arg(long = "choice")]
+        choices: Vec<String>,
+        #[arg(long, default_value = "120")]
+        timeout: u64,
+        #[arg(long)]
+        default: Option<String>,
+        #[arg(long)]
+        agent_id: Option<String>,
+    },
+    /// Claude Code hook entry points (read hook JSON from stdin)
+    Hook {
+        #[command(subcommand)]
+        cmd: HookCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -60,4 +86,14 @@ pub enum ModelCmd {
     },
     /// Show downloaded models and their paths
     List,
+}
+
+#[derive(Subcommand)]
+pub enum HookCmd {
+    /// SessionStart hook: registers this session as an agent
+    SessionStart,
+    /// PreToolUse hook: voice-approve/deny the pending tool call
+    PreToolUse,
+    /// Stop hook: notify that the agent finished a turn
+    Stop,
 }

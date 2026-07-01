@@ -1,6 +1,8 @@
+use crate::Config;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -242,6 +244,162 @@ pub fn decision_json(answer: Option<&str>) -> serde_json::Value {
             "permissionDecisionReason": if allow { "approved via voice" } else { "denied via voice (or no response)" }
         }
     })
+}
+
+fn read_stdin_json() -> Result<serde_json::Value> {
+    let mut buf = String::new();
+    std::io::stdin()
+        .read_to_string(&mut buf)
+        .context("failed to read hook stdin")?;
+    serde_json::from_str(&buf).context("failed to parse hook stdin as JSON")
+}
+
+fn daemon_base_url() -> String {
+    let port = Config::load().map(|c| c.port).unwrap_or(7878);
+    format!("http://127.0.0.1:{port}")
+}
+
+fn agent_name_for(cwd: &str) -> String {
+    Path::new(cwd)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("Claude Code")
+        .to_string()
+}
+
+pub fn run_session_start() -> Result<()> {
+    let payload = read_stdin_json()?;
+    let session_id = payload["session_id"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+    let cwd = payload["cwd"].as_str().unwrap_or(".").to_string();
+    let base = daemon_base_url();
+
+    // Daemon unreachable at session start is non-fatal — later hook calls
+    // will lazily register instead.
+    if let Err(e) = resolve_agent_id(
+        &base,
+        &Config::sessions_path(),
+        &session_id,
+        &agent_name_for(&cwd),
+    ) {
+        tracing::warn!(error = %e, "callout daemon unreachable at SessionStart — will retry lazily");
+    }
+    Ok(())
+}
+
+pub fn run_stop() -> Result<()> {
+    let payload = read_stdin_json()?;
+    let session_id = payload["session_id"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+    let cwd = payload["cwd"].as_str().unwrap_or(".").to_string();
+    let base = daemon_base_url();
+
+    let Ok(agent_id) = resolve_agent_id(
+        &base,
+        &Config::sessions_path(),
+        &session_id,
+        &agent_name_for(&cwd),
+    ) else {
+        return Ok(()); // fail-safe: daemon down, don't block Claude Code exiting the turn
+    };
+    let _ = notify(&base, &agent_id, "finished responding");
+    Ok(())
+}
+
+pub fn run_pre_tool_use() -> Result<()> {
+    let payload = read_stdin_json()?;
+    let session_id = payload["session_id"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+    let cwd = payload["cwd"].as_str().unwrap_or(".").to_string();
+    let tool_name = payload["tool_name"]
+        .as_str()
+        .unwrap_or("a tool")
+        .to_string();
+    let tool_input = payload
+        .get("tool_input")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
+    let base = daemon_base_url();
+
+    let Ok(agent_id) = resolve_agent_id(
+        &base,
+        &Config::sessions_path(),
+        &session_id,
+        &agent_name_for(&cwd),
+    ) else {
+        // Fail-safe: daemon unreachable -> print nothing, fall through to
+        // Claude Code's normal interactive permission prompt.
+        return Ok(());
+    };
+
+    let (question, choices) = pretooluse_question(&agent_name_for(&cwd), &tool_name, &tool_input);
+    let result = ask(&base, &agent_id, &question, &choices, 120, Some("n"));
+
+    match result {
+        Ok(r) => {
+            println!("{}", decision_json(r.answer.as_deref()));
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "ask call failed — falling through to normal permission prompt");
+        }
+    }
+    Ok(())
+}
+
+pub fn run_notify(message: &str, agent_id: Option<&str>) -> Result<()> {
+    let base = daemon_base_url();
+    let agent_id = match agent_id {
+        Some(id) => id.to_string(),
+        None => {
+            let session_id = std::env::var("CLAUDE_SESSION_ID").unwrap_or_else(|_| "manual".into());
+            resolve_agent_id(&base, &Config::sessions_path(), &session_id, "callout-cli")?
+        }
+    };
+    notify(&base, &agent_id, message)
+}
+
+pub fn run_ask(
+    question: &str,
+    choices: &[String],
+    timeout: u64,
+    default: Option<&str>,
+    agent_id: Option<&str>,
+) -> Result<()> {
+    let base = daemon_base_url();
+    let agent_id = match agent_id {
+        Some(id) => id.to_string(),
+        None => {
+            let session_id = std::env::var("CLAUDE_SESSION_ID").unwrap_or_else(|_| "manual".into());
+            resolve_agent_id(&base, &Config::sessions_path(), &session_id, "callout-cli")?
+        }
+    };
+    let parsed_choices: Vec<(String, String)> = choices
+        .iter()
+        .filter_map(|c| c.split_once(':'))
+        .map(|(k, l)| (k.to_string(), l.to_string()))
+        .collect();
+    let result = ask(
+        &base,
+        &agent_id,
+        question,
+        &parsed_choices,
+        timeout,
+        default,
+    )?;
+    match result.answer {
+        Some(a) => println!("{a}"),
+        None => println!(
+            "(no answer{})",
+            if result.timed_out { ", timed out" } else { "" }
+        ),
+    }
+    Ok(())
 }
 
 #[cfg(test)]
