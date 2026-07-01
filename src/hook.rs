@@ -48,6 +48,101 @@ pub fn save_registry(path: &Path, registry: &SessionRegistry) -> Result<()> {
     })
 }
 
+fn http_error(context: &str, e: ureq::Error) -> anyhow::Error {
+    anyhow::anyhow!("{context}: {e}")
+}
+
+pub fn register_agent(base_url: &str, name: &str) -> Result<String> {
+    #[derive(Serialize)]
+    struct Req<'a> {
+        name: &'a str,
+    }
+    #[derive(Deserialize)]
+    struct Resp {
+        agent_id: String,
+    }
+    let resp: Resp = ureq::post(&format!("{base_url}/agents/register"))
+        .send_json(Req { name })
+        .map_err(|e| http_error("agent registration failed", e))?
+        .into_json()
+        .context("failed to parse register response")?;
+    Ok(resp.agent_id)
+}
+
+pub fn notify(base_url: &str, agent_id: &str, message: &str) -> Result<()> {
+    #[derive(Serialize)]
+    struct Req<'a> {
+        agent_id: &'a str,
+        message: &'a str,
+    }
+    ureq::post(&format!("{base_url}/notify"))
+        .send_json(Req { agent_id, message })
+        .map_err(|e| http_error("notify failed", e))?;
+    Ok(())
+}
+
+#[derive(Deserialize)]
+pub struct AskResult {
+    pub answer: Option<String>,
+    pub timed_out: bool,
+}
+
+pub fn ask(
+    base_url: &str,
+    agent_id: &str,
+    question: &str,
+    choices: &[(String, String)],
+    timeout_seconds: u64,
+    default: Option<&str>,
+) -> Result<AskResult> {
+    #[derive(Serialize)]
+    struct ChoiceReq<'a> {
+        key: &'a str,
+        label: &'a str,
+    }
+    #[derive(Serialize)]
+    struct Req<'a> {
+        agent_id: &'a str,
+        question: &'a str,
+        choices: Vec<ChoiceReq<'a>>,
+        timeout_seconds: u64,
+        default: Option<&'a str>,
+    }
+    let req = Req {
+        agent_id,
+        question,
+        choices: choices
+            .iter()
+            .map(|(k, l)| ChoiceReq { key: k, label: l })
+            .collect(),
+        timeout_seconds,
+        default,
+    };
+    let result: AskResult = ureq::post(&format!("{base_url}/ask"))
+        .send_json(req)
+        .map_err(|e| http_error("ask failed", e))?
+        .into_json()
+        .context("failed to parse ask response")?;
+    Ok(result)
+}
+
+pub fn status_agent_ids(base_url: &str) -> Result<Vec<String>> {
+    #[derive(Deserialize)]
+    struct AgentStatus {
+        id: String,
+    }
+    #[derive(Deserialize)]
+    struct StatusResp {
+        agents: Vec<AgentStatus>,
+    }
+    let resp: StatusResp = ureq::get(&format!("{base_url}/status"))
+        .call()
+        .map_err(|e| http_error("status check failed", e))?
+        .into_json()
+        .context("failed to parse status response")?;
+    Ok(resp.agents.into_iter().map(|a| a.id).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
