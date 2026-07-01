@@ -127,3 +127,62 @@ async fn ask_returns_resolved_answer() {
     assert_eq!(result.answer.as_deref(), Some("yes"));
     assert!(!result.timed_out);
 }
+
+#[tokio::test]
+async fn resolve_agent_id_registers_once_and_reuses() {
+    let (base, _state) = spawn_server().await;
+    let dir = std::env::temp_dir().join(format!("callout-test-resolve-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("sessions.json");
+
+    let (base1, path1) = (base.clone(), path.clone());
+    let id1 = tokio::task::spawn_blocking(move || {
+        callout::hook::resolve_agent_id(&base1, &path1, "sess-a", "Test Agent")
+    })
+    .await
+    .unwrap()
+    .unwrap();
+
+    let (base2, path2) = (base.clone(), path.clone());
+    let id2 = tokio::task::spawn_blocking(move || {
+        callout::hook::resolve_agent_id(&base2, &path2, "sess-a", "Test Agent")
+    })
+    .await
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(id1, id2, "second call must reuse the cached agent_id");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn resolve_agent_id_reregisters_after_daemon_restart() {
+    let (base, _state) = spawn_server().await;
+    let dir = std::env::temp_dir().join(format!("callout-test-stale-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("sessions.json");
+
+    // Pretend a previous daemon instance registered this session.
+    let mut registry = callout::hook::SessionRegistry::new();
+    registry.insert(
+        "sess-b".into(),
+        callout::hook::SessionEntry {
+            agent_id: "stale1".into(),
+        },
+    );
+    callout::hook::save_registry(&path, &registry).unwrap();
+
+    let (base2, path2) = (base.clone(), path.clone());
+    let id = tokio::task::spawn_blocking(move || {
+        callout::hook::resolve_agent_id(&base2, &path2, "sess-b", "Test Agent")
+    })
+    .await
+    .unwrap()
+    .unwrap();
+
+    assert_ne!(
+        id, "stale1",
+        "must re-register when the daemon doesn't know the cached id"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

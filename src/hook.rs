@@ -139,6 +139,33 @@ pub fn ask(
     Ok(result)
 }
 
+pub fn resolve_agent_id(
+    base_url: &str,
+    registry_path: &Path,
+    session_id: &str,
+    name_hint: &str,
+) -> Result<String> {
+    let mut registry = load_registry(registry_path);
+
+    if let Some(entry) = registry.get(session_id) {
+        let known_ids = status_agent_ids(base_url)?;
+        if known_ids.contains(&entry.agent_id) {
+            return Ok(entry.agent_id.clone());
+        }
+        tracing::info!(session_id, "cached agent_id is stale — re-registering");
+    }
+
+    let agent_id = register_agent(base_url, name_hint)?;
+    registry.insert(
+        session_id.to_string(),
+        SessionEntry {
+            agent_id: agent_id.clone(),
+        },
+    );
+    save_registry(registry_path, &registry)?;
+    Ok(agent_id)
+}
+
 pub fn status_agent_ids(base_url: &str) -> Result<Vec<String>> {
     #[derive(Deserialize)]
     struct AgentStatus {
