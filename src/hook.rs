@@ -188,9 +188,46 @@ pub fn status_agent_ids(base_url: &str) -> Result<Vec<String>> {
     Ok(resp.agents.into_iter().map(|a| a.id).collect())
 }
 
+pub fn pretooluse_question(
+    agent_name: &str,
+    tool_name: &str,
+    tool_input: &serde_json::Value,
+) -> (String, Vec<(String, String)>) {
+    let detail = tool_input
+        .get("command")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| tool_input.to_string());
+    let question = format!("{agent_name} wants to run {tool_name}: {detail}. Allow?");
+    (
+        question,
+        vec![
+            ("y".to_string(), "yes".to_string()),
+            ("n".to_string(), "no".to_string()),
+        ],
+    )
+}
+
+/// Maps a PTT answer to Claude Code's PreToolUse decision JSON.
+/// `None` (timeout, or no answer) fails safe to deny.
+pub fn decision_json(answer: Option<&str>) -> serde_json::Value {
+    let allow = matches!(
+        answer.map(str::to_lowercase).as_deref(),
+        Some("y") | Some("yes")
+    );
+    serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": if allow { "allow" } else { "deny" },
+            "permissionDecisionReason": if allow { "approved via voice" } else { "denied via voice (or no response)" }
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn load_registry_missing_file_returns_empty() {
@@ -240,5 +277,38 @@ mod tests {
         save_registry(&path, &SessionRegistry::new()).unwrap();
         assert!(path.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pretooluse_question_includes_command_for_bash() {
+        let (q, choices) =
+            pretooluse_question("Test Agent", "Bash", &json!({"command": "rm -rf dist"}));
+        assert!(q.contains("Test Agent"));
+        assert!(q.contains("rm -rf dist"));
+        assert_eq!(
+            choices,
+            vec![
+                ("y".to_string(), "yes".to_string()),
+                ("n".to_string(), "no".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn decision_json_approve_on_yes() {
+        let v = decision_json(Some("y"));
+        assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "allow");
+    }
+
+    #[test]
+    fn decision_json_deny_on_no() {
+        let v = decision_json(Some("n"));
+        assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny");
+    }
+
+    #[test]
+    fn decision_json_deny_on_timeout_or_missing_answer() {
+        let v = decision_json(None);
+        assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny");
     }
 }
