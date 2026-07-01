@@ -49,7 +49,7 @@ pub enum Command {
         /// Choice in "key:label" form, repeatable
         #[arg(long = "choice")]
         choices: Vec<String>,
-        #[arg(long, default_value = "120")]
+        #[arg(long, default_value_t = crate::hook::DEFAULT_ASK_TIMEOUT_SECS)]
         timeout: u64,
         #[arg(long)]
         default: Option<String>,

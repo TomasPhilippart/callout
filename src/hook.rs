@@ -246,6 +246,31 @@ pub fn decision_json(answer: Option<&str>) -> serde_json::Value {
     })
 }
 
+/// Default timeout (seconds) for the voice-approval `ask()` call made from
+/// `run_pre_tool_use`, and the default for the standalone `callout ask` CLI
+/// command.
+///
+/// IMPORTANT for whoever wires this into `.claude/settings.json` (Task 8):
+/// Claude Code applies its own timeout to hook execution (defaulting to
+/// ~60s unless the hook's settings.json entry sets a `timeout` field), which
+/// is independent of and shorter than this constant. Since a PreToolUse hook
+/// invocation can legitimately block here for up to `DEFAULT_ASK_TIMEOUT_SECS`
+/// waiting for a PTT voice answer, the settings.json entry for this hook
+/// MUST set its own `timeout` field to at least this many seconds — otherwise
+/// Claude Code will kill the `callout hook pre-tool-use` process before the
+/// daemon ever gets to respond, and the tool call silently falls through to
+/// Claude Code's default (non-voice) permission behavior.
+pub const DEFAULT_ASK_TIMEOUT_SECS: u64 = 120;
+
+/// Dispatches a `callout hook <cmd>` subcommand to its entry point.
+pub fn run(cmd: crate::cli::HookCmd) -> Result<()> {
+    match cmd {
+        crate::cli::HookCmd::SessionStart => run_session_start(),
+        crate::cli::HookCmd::PreToolUse => run_pre_tool_use(),
+        crate::cli::HookCmd::Stop => run_stop(),
+    }
+}
+
 fn read_stdin_json() -> Result<serde_json::Value> {
     let mut buf = String::new();
     std::io::stdin()
@@ -255,8 +280,10 @@ fn read_stdin_json() -> Result<serde_json::Value> {
 }
 
 fn daemon_base_url() -> String {
-    let port = Config::load().map(|c| c.port).unwrap_or(7878);
-    format!("http://127.0.0.1:{port}")
+    format!(
+        "http://127.0.0.1:{}",
+        Config::load().unwrap_or_default().port
+    )
 }
 
 fn agent_name_for(cwd: &str) -> String {
@@ -267,56 +294,76 @@ fn agent_name_for(cwd: &str) -> String {
         .to_string()
 }
 
+/// $CLAUDE_SESSION_ID, or "manual" when running outside a Claude Code
+/// session (e.g. a human invoking `callout notify`/`callout ask` directly).
+fn cli_session_id() -> String {
+    std::env::var("CLAUDE_SESSION_ID").unwrap_or_else(|_| "manual".into())
+}
+
+/// Common fields every hook stdin payload carries, plus the resolved daemon
+/// base URL. Centralizes the "read stdin -> parse -> pull session_id/cwd"
+/// boilerplate shared by all three `run_*` hook entry points.
+struct HookContext {
+    base: String,
+    session_id: String,
+    cwd: String,
+}
+
+impl HookContext {
+    /// Reads and parses the hook JSON payload from stdin, returning both the
+    /// common context and the raw payload (for callers like
+    /// `run_pre_tool_use` that need additional fields, e.g. `tool_name`).
+    fn from_stdin() -> Result<(Self, serde_json::Value)> {
+        let payload = read_stdin_json()?;
+        let ctx = Self {
+            base: daemon_base_url(),
+            session_id: payload["session_id"]
+                .as_str()
+                .unwrap_or("unknown")
+                .to_string(),
+            cwd: payload["cwd"].as_str().unwrap_or(".").to_string(),
+        };
+        Ok((ctx, payload))
+    }
+
+    fn resolve_agent_id(&self) -> Result<String> {
+        resolve_agent_id(
+            &self.base,
+            &Config::sessions_path(),
+            &self.session_id,
+            &agent_name_for(&self.cwd),
+        )
+    }
+}
+
 pub fn run_session_start() -> Result<()> {
-    let payload = read_stdin_json()?;
-    let session_id = payload["session_id"]
-        .as_str()
-        .unwrap_or("unknown")
-        .to_string();
-    let cwd = payload["cwd"].as_str().unwrap_or(".").to_string();
-    let base = daemon_base_url();
+    let (ctx, _payload) = HookContext::from_stdin()?;
 
     // Daemon unreachable at session start is non-fatal — later hook calls
     // will lazily register instead.
-    if let Err(e) = resolve_agent_id(
-        &base,
-        &Config::sessions_path(),
-        &session_id,
-        &agent_name_for(&cwd),
-    ) {
+    if let Err(e) = ctx.resolve_agent_id() {
         tracing::warn!(error = %e, "callout daemon unreachable at SessionStart — will retry lazily");
     }
     Ok(())
 }
 
 pub fn run_stop() -> Result<()> {
-    let payload = read_stdin_json()?;
-    let session_id = payload["session_id"]
-        .as_str()
-        .unwrap_or("unknown")
-        .to_string();
-    let cwd = payload["cwd"].as_str().unwrap_or(".").to_string();
-    let base = daemon_base_url();
+    let (ctx, _payload) = HookContext::from_stdin()?;
 
-    let Ok(agent_id) = resolve_agent_id(
-        &base,
-        &Config::sessions_path(),
-        &session_id,
-        &agent_name_for(&cwd),
-    ) else {
-        return Ok(()); // fail-safe: daemon down, don't block Claude Code exiting the turn
+    let agent_id = match ctx.resolve_agent_id() {
+        Ok(id) => id,
+        Err(e) => {
+            // Fail-safe: daemon down, don't block Claude Code exiting the turn.
+            tracing::warn!(error = %e, "callout daemon unreachable at Stop — skipping notification");
+            return Ok(());
+        }
     };
-    let _ = notify(&base, &agent_id, "finished responding");
+    let _ = notify(&ctx.base, &agent_id, "finished responding");
     Ok(())
 }
 
 pub fn run_pre_tool_use() -> Result<()> {
-    let payload = read_stdin_json()?;
-    let session_id = payload["session_id"]
-        .as_str()
-        .unwrap_or("unknown")
-        .to_string();
-    let cwd = payload["cwd"].as_str().unwrap_or(".").to_string();
+    let (ctx, payload) = HookContext::from_stdin()?;
     let tool_name = payload["tool_name"]
         .as_str()
         .unwrap_or("a tool")
@@ -325,21 +372,27 @@ pub fn run_pre_tool_use() -> Result<()> {
         .get("tool_input")
         .cloned()
         .unwrap_or(serde_json::json!({}));
-    let base = daemon_base_url();
 
-    let Ok(agent_id) = resolve_agent_id(
-        &base,
-        &Config::sessions_path(),
-        &session_id,
-        &agent_name_for(&cwd),
-    ) else {
-        // Fail-safe: daemon unreachable -> print nothing, fall through to
-        // Claude Code's normal interactive permission prompt.
-        return Ok(());
+    let agent_id = match ctx.resolve_agent_id() {
+        Ok(id) => id,
+        Err(e) => {
+            // Fail-safe: daemon unreachable -> print nothing, fall through to
+            // Claude Code's normal interactive permission prompt.
+            tracing::warn!(error = %e, "callout daemon unreachable at PreToolUse — falling through to normal permission prompt");
+            return Ok(());
+        }
     };
 
-    let (question, choices) = pretooluse_question(&agent_name_for(&cwd), &tool_name, &tool_input);
-    let result = ask(&base, &agent_id, &question, &choices, 120, Some("n"));
+    let (question, choices) =
+        pretooluse_question(&agent_name_for(&ctx.cwd), &tool_name, &tool_input);
+    let result = ask(
+        &ctx.base,
+        &agent_id,
+        &question,
+        &choices,
+        DEFAULT_ASK_TIMEOUT_SECS,
+        Some("n"),
+    );
 
     match result {
         Ok(r) => {
@@ -356,10 +409,12 @@ pub fn run_notify(message: &str, agent_id: Option<&str>) -> Result<()> {
     let base = daemon_base_url();
     let agent_id = match agent_id {
         Some(id) => id.to_string(),
-        None => {
-            let session_id = std::env::var("CLAUDE_SESSION_ID").unwrap_or_else(|_| "manual".into());
-            resolve_agent_id(&base, &Config::sessions_path(), &session_id, "callout-cli")?
-        }
+        None => resolve_agent_id(
+            &base,
+            &Config::sessions_path(),
+            &cli_session_id(),
+            "callout-cli",
+        )?,
     };
     notify(&base, &agent_id, message)
 }
@@ -374,10 +429,12 @@ pub fn run_ask(
     let base = daemon_base_url();
     let agent_id = match agent_id {
         Some(id) => id.to_string(),
-        None => {
-            let session_id = std::env::var("CLAUDE_SESSION_ID").unwrap_or_else(|_| "manual".into());
-            resolve_agent_id(&base, &Config::sessions_path(), &session_id, "callout-cli")?
-        }
+        None => resolve_agent_id(
+            &base,
+            &Config::sessions_path(),
+            &cli_session_id(),
+            "callout-cli",
+        )?,
     };
     let parsed_choices: Vec<(String, String)> = choices
         .iter()
