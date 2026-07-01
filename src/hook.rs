@@ -8,22 +8,44 @@ pub struct SessionEntry {
     pub agent_id: String,
 }
 
-pub type Registry = HashMap<String, SessionEntry>;
+// Not safe for concurrent writers — revisit if Task 3+ shows this is a real problem.
+pub type SessionRegistry = HashMap<String, SessionEntry>;
 
-pub fn load_registry(path: &Path) -> Registry {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+pub fn load_registry(path: &Path) -> SessionRegistry {
+    let Ok(s) = std::fs::read_to_string(path) else {
+        return SessionRegistry::default();
+    };
+    match serde_json::from_str(&s) {
+        Ok(registry) => registry,
+        Err(e) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "failed to parse session registry, using empty defaults"
+            );
+            SessionRegistry::default()
+        }
+    }
 }
 
-pub fn save_registry(path: &Path, registry: &Registry) -> Result<()> {
+// Not safe for concurrent writers — revisit if Task 3+ shows this is a real problem.
+pub fn save_registry(path: &Path, registry: &SessionRegistry) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    let s = serde_json::to_string_pretty(registry)?;
-    std::fs::write(path, s).with_context(|| format!("failed to write {}", path.display()))
+    let s =
+        serde_json::to_string_pretty(registry).context("failed to serialize session registry")?;
+    let tmp_path = path.with_extension("json.tmp");
+    std::fs::write(&tmp_path, s)
+        .with_context(|| format!("failed to write {}", tmp_path.display()))?;
+    std::fs::rename(&tmp_path, path).with_context(|| {
+        format!(
+            "failed to rename {} to {}",
+            tmp_path.display(),
+            path.display()
+        )
+    })
 }
 
 #[cfg(test)]
@@ -32,15 +54,32 @@ mod tests {
 
     #[test]
     fn load_registry_missing_file_returns_empty() {
-        let path = std::env::temp_dir().join("callout-test-missing-sessions.json");
+        let path = std::env::temp_dir().join(format!(
+            "callout-test-missing-sessions-{}.json",
+            std::process::id()
+        ));
         let _ = std::fs::remove_file(&path);
         assert!(load_registry(&path).is_empty());
     }
 
     #[test]
+    fn load_registry_corrupt_file_returns_empty_and_logs() {
+        let path = std::env::temp_dir().join(format!(
+            "callout-test-corrupt-sessions-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(&path, "not valid json").unwrap();
+        assert!(load_registry(&path).is_empty());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn save_then_load_roundtrips() {
-        let path = std::env::temp_dir().join("callout-test-roundtrip-sessions.json");
-        let mut registry = Registry::new();
+        let path = std::env::temp_dir().join(format!(
+            "callout-test-roundtrip-sessions-{}.json",
+            std::process::id()
+        ));
+        let mut registry = SessionRegistry::new();
         registry.insert(
             "sess1".into(),
             SessionEntry {
@@ -58,7 +97,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("callout-test-dir-{}", std::process::id()));
         let path = dir.join("sessions.json");
         let _ = std::fs::remove_dir_all(&dir);
-        save_registry(&path, &Registry::new()).unwrap();
+        save_registry(&path, &SessionRegistry::new()).unwrap();
         assert!(path.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
