@@ -211,9 +211,20 @@ pub fn pretooluse_question(
     let question = format!("{agent_name} wants to run {tool_name}: {detail}. Allow?");
     (
         question,
+        // Deliberately NOT single-character keys like "y"/"n": `match_choice`
+        // (src/router.rs) does substring matching over the raw transcript,
+        // so a one-letter key collides with common negative-response words
+        // ("no wa*y*", "*y*et", "definitel*y*"). "deny" and "allow" are
+        // long enough to avoid that class of accidental substring match.
+        //
+        // "deny" is listed FIRST — defense in depth. `match_choice` checks
+        // choices in list order and returns on the first match, so if some
+        // other unanticipated substring collision ever slips in, checking
+        // the deny option first at least biases the outcome toward the
+        // fail-safe (deny) side rather than the risky (allow) side.
         vec![
-            ("y".to_string(), "yes".to_string()),
-            ("n".to_string(), "no".to_string()),
+            ("deny".to_string(), "deny".to_string()),
+            ("allow".to_string(), "allow".to_string()),
         ],
     )
 }
@@ -230,12 +241,14 @@ pub fn pretooluse_question(
 /// Maps a PTT answer to Claude Code's PreToolUse decision JSON.
 /// `None` (timeout, or no answer) fails safe to deny.
 pub fn decision_json(answer: Option<&str>) -> serde_json::Value {
-    // "yes" is currently unreachable from the only caller: the router always
-    // resolves an /ask response to the choice *key* ("y"/"n"), never the
-    // label. Kept as intentional lenience for future callers, not dead code.
+    // "allow" is the key `pretooluse_question` actually produces and the
+    // one the real caller (`run_pre_tool_use`) resolves through the router.
+    // "y"/"yes" are kept as lenient fallbacks for other potential callers
+    // (e.g. hand-rolled `callout ask` invocations) — not dead code, just not
+    // reachable from the production PreToolUse path anymore.
     let allow = matches!(
         answer.map(str::to_lowercase).as_deref(),
-        Some("y") | Some("yes")
+        Some("allow") | Some("y") | Some("yes")
     );
     serde_json::json!({
         "hookSpecificOutput": {
@@ -252,14 +265,17 @@ pub fn decision_json(answer: Option<&str>) -> serde_json::Value {
 ///
 /// IMPORTANT for whoever wires this into `.claude/settings.json` (Task 8):
 /// Claude Code applies its own timeout to hook execution (defaulting to
-/// ~60s unless the hook's settings.json entry sets a `timeout` field), which
-/// is independent of and shorter than this constant. Since a PreToolUse hook
-/// invocation can legitimately block here for up to `DEFAULT_ASK_TIMEOUT_SECS`
-/// waiting for a PTT voice answer, the settings.json entry for this hook
-/// MUST set its own `timeout` field to at least this many seconds — otherwise
-/// Claude Code will kill the `callout hook pre-tool-use` process before the
-/// daemon ever gets to respond, and the tool call silently falls through to
-/// Claude Code's default (non-voice) permission behavior.
+/// 600s unless the hook's settings.json entry sets a `timeout` field), which
+/// is a separate, independently-configured limit from this constant — don't
+/// assume it covers you just because today's 600s default happens to exceed
+/// `DEFAULT_ASK_TIMEOUT_SECS`. Since a PreToolUse hook invocation can
+/// legitimately block here for up to `DEFAULT_ASK_TIMEOUT_SECS` waiting for
+/// a PTT voice answer, the settings.json entry for this hook MUST still
+/// explicitly set its own `timeout` field to at least this many seconds —
+/// otherwise Claude Code will kill the `callout hook pre-tool-use` process
+/// before the daemon ever gets to respond (whether because the default
+/// changes upstream or this constant grows), and the tool call silently
+/// falls through to Claude Code's default (non-voice) permission behavior.
 pub const DEFAULT_ASK_TIMEOUT_SECS: u64 = 120;
 
 /// Dispatches a `callout hook <cmd>` subcommand to its entry point.
@@ -523,14 +539,38 @@ mod tests {
         assert_eq!(
             choices,
             vec![
-                ("y".to_string(), "yes".to_string()),
-                ("n".to_string(), "no".to_string())
+                ("deny".to_string(), "deny".to_string()),
+                ("allow".to_string(), "allow".to_string())
             ]
         );
     }
 
+    /// `match_choice` (src/router.rs) checks choices in list order and
+    /// returns on the first substring match. `pretooluse_question` puts
+    /// "deny" before "allow" deliberately, as defense in depth for this
+    /// fail-safe-biased decision: if an unanticipated substring collision
+    /// ever slips in, checking deny first biases the outcome toward the
+    /// safe (deny) side rather than the risky (allow) side. This test pins
+    /// that ordering so a future refactor can't silently flip it.
     #[test]
-    fn decision_json_approve_on_yes() {
+    fn pretooluse_question_lists_deny_before_allow() {
+        let (_q, choices) =
+            pretooluse_question("Test Agent", "Bash", &json!({"command": "rm -rf dist"}));
+        assert_eq!(
+            choices[0].0, "deny",
+            "deny must be checked first by match_choice"
+        );
+        assert_eq!(choices[1].0, "allow");
+    }
+
+    #[test]
+    fn decision_json_approve_on_allow() {
+        let v = decision_json(Some("allow"));
+        assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "allow");
+    }
+
+    #[test]
+    fn decision_json_approve_on_yes_lenient_fallback() {
         let v = decision_json(Some("y"));
         assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "allow");
     }

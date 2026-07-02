@@ -128,6 +128,61 @@ async fn ask_returns_resolved_answer() {
     assert!(!result.timed_out);
 }
 
+/// Regression test for a real bug: `pretooluse_question`'s choices, run
+/// through the *actual* production `AskRouter::resolve` (which does
+/// substring matching, checking choices in list order), must not let a
+/// verbal denial like "no way" get misread as approval just because the
+/// approve choice's key happens to be a substring of a common negative
+/// phrase. This exercises the real production choice list produced by
+/// `pretooluse_question` — not a hand-written stand-in — so it would have
+/// caught the original `y`/`n` key collision with "no wa*y*".
+#[tokio::test]
+async fn pretooluse_voice_denial_phrases_are_not_misread_as_allow() {
+    let (base, state) = spawn_server().await;
+
+    for phrase in ["no way", "definitely not", "not yet"] {
+        let id = tokio::task::spawn_blocking({
+            let base = base.clone();
+            move || callout::hook::register_agent(&base, "Test Agent")
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+        let (_question, choices) = callout::hook::pretooluse_question(
+            "Test Agent",
+            "Bash",
+            &serde_json::json!({"command": "rm -rf dist"}),
+        );
+
+        let ask_handle = tokio::task::spawn_blocking({
+            let base = base.clone();
+            let id = id.clone();
+            move || callout::hook::ask(&base, &id, "Allow?", &choices, 5, None)
+        });
+
+        loop {
+            if state.router.lock().await.pending_count() > 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(state.router.lock().await.resolve(&id, phrase.to_string()));
+
+        let result = ask_handle.await.unwrap().unwrap();
+        // The real safety property: running the resolved answer through
+        // `decision_json` (exactly as `run_pre_tool_use` does) must never
+        // yield `permissionDecision: "allow"` for a phrase that was a
+        // verbal denial.
+        let decision = callout::hook::decision_json(result.answer.as_deref());
+        assert_ne!(
+            decision["hookSpecificOutput"]["permissionDecision"], "allow",
+            "phrase {phrase:?} (resolved answer: {:?}) must not decide to allow",
+            result.answer
+        );
+    }
+}
+
 #[tokio::test]
 async fn resolve_agent_id_registers_once_and_reuses() {
     let (base, _state) = spawn_server().await;
