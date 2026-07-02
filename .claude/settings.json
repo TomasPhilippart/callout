@@ -1,0 +1,36 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/philippart/Developer/callout/.worktrees/voice-permission-hooks/target/debug/callout hook session-start"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/philippart/Developer/callout/.worktrees/voice-permission-hooks/target/debug/callout hook stop"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/philippart/Developer/callout/.worktrees/voice-permission-hooks/target/debug/callout hook pre-tool-use",
+            "timeout": 130
+          }
+        ]
+      }
+    ]
+  }
+}
