@@ -198,6 +198,17 @@ pub fn status_agent_ids(base_url: &str) -> Result<Vec<String>> {
 /// for today's Bash-only allowlist but should be tightened with per-tool
 /// formatting before this is widened to other tools (e.g. Edit/Write/WebFetch)
 /// whose JSON doesn't read naturally aloud.
+///
+/// Known limitation: negated phrases that contain the "allow" key word
+/// itself (e.g. "don't allow", "do not allow", "disallow") will currently
+/// resolve to allow, because `AskRouter::match_choice` (src/router.rs) does
+/// plain substring matching with no negation awareness — it finds "allow"
+/// inside "don't allow" and stops there. Fixing this requires changing
+/// `match_choice`'s algorithm, which is shared infra used by other `/ask`
+/// callers outside this hook, so it's out of scope here. Voice responses to
+/// a yes/no prompt overwhelmingly use short direct words ("no", "deny",
+/// "allow it") rather than negated sentences, but this is a real gap, not
+/// just a theoretical one.
 pub fn pretooluse_question(
     agent_name: &str,
     tool_name: &str,
