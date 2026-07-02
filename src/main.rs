@@ -13,6 +13,23 @@ fn main() -> anyhow::Result<()> {
         #[cfg(target_os = "macos")]
         Some(Command::Uninstall) => callout::install::uninstall(),
         Some(Command::Logs { lines }) => callout::logs::print_recent(lines),
+        Some(Command::Notify { message, agent_id }) => {
+            callout::hook::run_notify(&message, agent_id.as_deref())
+        }
+        Some(Command::Ask {
+            question,
+            choices,
+            timeout,
+            default,
+            agent_id,
+        }) => callout::hook::run_ask(
+            &question,
+            &choices,
+            timeout,
+            default.as_deref(),
+            agent_id.as_deref(),
+        ),
+        Some(Command::Hook { cmd }) => callout::hook::run(cmd),
     }
 }
 
